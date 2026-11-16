@@ -39,6 +39,8 @@ La validación comprueba ambos hashes antes de copiar archivos al checkout. La t
 | Privacidad inicial | Cookies de terceros bloqueadas, sugerencias desactivadas y Safe Browsing habilitado |
 | Ahorro de memoria inicial | Estado 2, modo equilibrado 1 conservados |
 | Panel nativo observado en Windows | Contador 2 → 3 tras solicitud tardía → 2 después de navegar; el panel anterior se cierra |
+| Revisión visual tras desbloquear Windows | Estado desactivado con cero bloqueos y opción de activar; estado activo sin anuncios con cero y opción de desactivar |
+| Contador de trabajador y solicitud tardía | En la compilación final, dos solicitudes iniciales + trabajador + petición tardía = 4; con excepción, ambas solicitudes se permiten |
 | Trabajador web y petición tardía | Bloqueados con servidor CORS permisivo; se evita confundir un fallo CORS con bloqueo del filtro |
 | Reproducción de parches | Los seis parches se aplican a 48 archivos desde la revisión base y coinciden con las fuentes compiladas |
 
@@ -66,9 +68,9 @@ Para observar el panel, ejecutar la prueba de red con `--headed --inspect-panel`
 
 ## Límites pendientes
 
-- La herramienta de Windows dejó de permitir interacción con el escritorio (`GetCursorPos: acceso denegado`). Se detuvo la automatización visual. Quedan pendientes revisar visualmente el estado desactivado/cero bloqueos y ejecutar la acción reversible desde el control.
+- El acceso al escritorio se recuperó después de que Luis desbloqueó Windows. Pasaron las comprobaciones visuales de estado desactivado/cero, activo/cero y contador con trabajador. El ciclo de guardar/desactivar/reactivar y su persistencia se completó el 16 de noviembre con la herramienta de control actualizada, exclusivamente en el perfil aislado; ver `2026-11-16-protection-control.md`.
 - Se añadieron/ajustaron pruebas C++ para el contador, documentos anteriores, excepción reversible y disponibilidad del icono; las suites C++ completas no se compilaron ni ejecutaron. No se presentan como aprobadas.
-- Las pruebas por perfiles preparados verifican la semántica de ALLOW/BLOCK; no sustituyen la prueba pendiente del clic de confirmación del panel.
+- Las pruebas iniciales por perfiles preparados se complementaron el 16 de noviembre con cambios desde el propio panel y reinicios sin preparar de nuevo las preferencias.
 - Los textos propios de este panel están inicialmente en español. Falta la integración completa de traducciones y la revisión de accesibilidad en todos los temas/escalados.
 - No se afirma compatibilidad con toda la sintaxis de EasyList, ausencia de seguimiento ni ausencia de destellos antes del procesamiento agrupado. Falta ampliar pruebas con sitios reales, documentos complejos y Shadow DOM.
 - No se repitió una comparación temporal de RAM para esta compilación; solo se comprobó la configuración. Las cifras del informe de memoria anterior no son una comparación nueva ni una comparación contra Chrome comercial.

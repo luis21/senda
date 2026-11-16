@@ -16,7 +16,25 @@ try {
   assert.ok(target,'Controlled Senda test page required');
   const session=(await cdp.send('Target.attachToTarget',{targetId:target.targetId,flatten:true})).sessionId;
   const url=new URL(target.url);
-  if(command==='late') {
+  if(command==='state') {
+    let observed;
+    const limit=Date.now()+15000;
+    while(Date.now()<limit) {
+      try {
+        const result=await cdp.send('Runtime.evaluate',{expression:`({ready:document.readyState,good:!!window.sendaGood,ad:!!window.sendaAd,tracker:!!window.sendaTracker,display:document.getElementById('adbanner1')?getComputedStyle(document.getElementById('adbanner1')).display:null})`,returnByValue:true},session);
+        observed=result.result.value;
+        if(observed?.ready==='complete'&&observed.good&&observed.ad===allow&&observed.tracker===allow&&observed.display===(allow?'block':'none'))break;
+      } catch(error) {
+        if(!/context.*destroyed|Cannot find context/i.test(error.message))throw error;
+      }
+      await new Promise(resolve=>setTimeout(resolve,100));
+    }
+    console.log(JSON.stringify({observed}));
+    assert.equal(observed?.good,true,'Legitimate content must load after the setting change');
+    assert.equal(observed?.ad,allow,'Ad request did not reflect the saved setting');
+    assert.equal(observed?.tracker,allow,'Tracking request did not reflect the saved setting');
+    assert.equal(observed?.display,allow?'block':'none','Cosmetic filtering did not reflect the saved setting');
+  } else if(command==='late') {
     const request=`http://tracker.senda.test:${url.port}/__utm.gif?late`;
     const result=await cdp.send('Runtime.evaluate',{expression:`fetch(${JSON.stringify(request)}).then(()=>false,()=>true)`,awaitPromise:true,returnByValue:true},session);
     assert.equal(result.result.value,!allow,'Late request must respect the native site exception');
@@ -29,7 +47,7 @@ try {
   } else if(command==='close') {
     await cdp.send('Browser.close');
   } else {
-    throw Error('Use late, worker, reset, empty or close');
+    throw Error('Use state, late, worker, reset, empty or close');
   }
   console.log(JSON.stringify({command,status:'PASS',profile:path.basename(profile)}));
 } finally {

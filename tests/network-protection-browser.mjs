@@ -8,7 +8,8 @@ import {connect} from './helpers/cdp.mjs';
 const root=process.cwd();
 const profile=path.resolve(process.argv[2] || '.profiles/protection-test');
 assert.ok(profile.startsWith(path.join(root,'.profiles')+path.sep), 'Use a dedicated workspace test profile');
-const allow=process.argv.includes('--allow-site');
+const prepareAllow=process.argv.includes('--allow-site');
+const allow=prepareAllow||process.argv.includes('--expect-allowed');
 const cosmetic=process.argv.includes('--cosmetic');
 const customPrivacy=process.argv.includes('--custom-privacy');
 const received=[];
@@ -45,7 +46,10 @@ const server=http.createServer((req,res)=>{
     res.end(req.url==='/good.js'?'window.sendaGood=true':req.url==='/__utm.gif'?'window.sendaTracker=true':'window.sendaAd=true');
   }
 });
-await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+const fixedPortArg=process.argv.find(arg=>arg.startsWith('--port='));
+const requestedPort=fixedPortArg?Number(fixedPortArg.slice(7)):0;
+assert.ok(Number.isInteger(requestedPort)&&requestedPort>=0&&requestedPort<=65535,'Invalid test server port');
+await new Promise(resolve=>server.listen(requestedPort,'127.0.0.1',resolve));
 port=server.address().port;
 await mkdir(profile,{recursive:true});
 await rm(path.join(profile,'DevToolsActivePort'),{force:true});
@@ -53,10 +57,10 @@ if(unavailable) {
   await mkdir(path.join(profile,'Subresource Filter'),{recursive:true});
   await writeFile(path.join(profile,'Subresource Filter/Indexed Rules'),'Controlled test obstruction');
 }
-if(allow || customPrivacy) {
+if(prepareAllow || customPrivacy) {
   await mkdir(path.join(profile,'Default'),{recursive:true});
   const preferences={profile:{}};
-  if(allow)preferences.profile.content_settings={exceptions:{subresource_filter:{[`http://site.senda.test:${port},*`]:{setting:1}}}};
+  if(prepareAllow)preferences.profile.content_settings={exceptions:{subresource_filter:{[`http://site.senda.test:${port},*`]:{setting:1}}}};
   if(customPrivacy) {
     preferences.profile.cookie_controls_mode=0;
     preferences.search={suggest_enabled:true};
@@ -92,7 +96,7 @@ try {
   const loadedDeadline=Date.now()+(unavailable?45000:20000);
   while(Date.now()<loadedDeadline) {
     try {
-      const result=await cdp.send('Runtime.evaluate',{expression:'JSON.stringify({ready:document.readyState,good:!!window.sendaGood,ad:!!window.sendaAd,tracker:!!window.sendaTracker,protectionError:document.title.includes("proteccion no disponible")})',returnByValue:true},session);
+      const result=await cdp.send('Runtime.evaluate',{expression:'JSON.stringify({ready:document.readyState,url:location.href,title:document.title,good:!!window.sendaGood,ad:!!window.sendaAd,tracker:!!window.sendaTracker,protectionError:document.title.includes("proteccion no disponible")})',returnByValue:true},session);
       if(result.result.value)observed=JSON.parse(result.result.value);
     } catch(error) {
       if(!/context.*destroyed|Cannot find context/i.test(error.message))throw error;

@@ -3,9 +3,12 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
-import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
+
+def write_if_changed(path, data):
+    if not path.exists() or path.read_bytes() != data:
+        path.write_bytes(data)
 
 def verify_snapshot(directory):
     directory = Path(directory)
@@ -34,13 +37,14 @@ def sync_snapshot(directory, chromium_root):
     if 'cosmetic_exceptions' in manifest:
         names.append('CosmeticExceptions.inc')
     for name in names:
-        shutil.copyfile(Path(directory)/name, target/name)
+        write_if_changed(target/name, (Path(directory)/name).read_bytes())
     versions = ', '.join(item['version'] for item in manifest['sources'])
-    (target/'README.chromium').write_text(
+    readme = (
         'Name: EasyList and EasyPrivacy\nShort Name: senda_filter_lists\nURL: https://easylist.to/\n'
         'Version: '+versions+'\nLicense: CC-BY-SA-3.0\nLicense File: LICENSE\nSecurity Critical: yes\nShipped: yes\n\n'
         'Description:\nSupported network URL and cosmetic CSS rules for the Senda native blocker.\n\n'
-        'Local Modifications:\nConverted with Chromium ruleset_converter; negative CSS domains become explicit exceptions and unsupported syntax is omitted.\n', encoding='utf-8')
+        'Local Modifications:\nConverted with Chromium ruleset_converter; negative CSS domains become explicit exceptions and unsupported syntax is omitted.\n')
+    write_if_changed(target/'README.chromium',readme.encode('utf-8'))
     return manifest
 
 if __name__ == '__main__':

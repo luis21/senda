@@ -517,3 +517,104 @@ diff --git a/chrome/browser/ui/content_settings/content_setting_image_model_unit
  }
  
  TEST_F(ContentSettingImageModelTest, NotificationsIconVisibility) {
+diff --git a/chrome/browser/ui/views/content_setting_bubble_contents.cc b/chrome/browser/ui/views/content_setting_bubble_contents.cc
+--- a/chrome/browser/ui/views/content_setting_bubble_contents.cc
++++ b/chrome/browser/ui/views/content_setting_bubble_contents.cc
+@@ -541,7 +541,10 @@
+               bubble->content_setting_bubble_model_->OnManageCheckboxChecked(
+                   bubble->manage_checkbox_->GetChecked());
+               // Toggling the check state may change the dialog button text.
+-              bubble->DialogModelChanged();
++              bubble->SetButtonLabel(
++                  ui::mojom::DialogButton::kOk,
++                  GetDoneButtonText(
++                      bubble->content_setting_bubble_model_->bubble_content()));
+             },
+             base::Unretained(this)));
+     manage_checkbox_ = manage_checkbox.get();
+diff --git a/chrome/browser/ui/views/content_setting_bubble_contents_unittest.cc b/chrome/browser/ui/views/content_setting_bubble_contents_unittest.cc
+--- a/chrome/browser/ui/views/content_setting_bubble_contents_unittest.cc
++++ b/chrome/browser/ui/views/content_setting_bubble_contents_unittest.cc
+@@ -14,7 +14,9 @@
+ #include "ui/base/metadata/metadata_impl_macros.h"
+ #include "ui/gfx/text_utils.h"
+ #include "ui/views/bubble/bubble_dialog_delegate_view.h"
++#include "ui/views/controls/button/checkbox.h"
+ #include "ui/views/controls/link.h"
++#include "ui/views/test/button_test_api.h"
+ #include "ui/views/view_utils.h"
+ 
+ class ContentSettingBubbleContentsTest : public ChromeViewsTestBase {
+@@ -31,6 +33,20 @@
+       : ContentSettingBubbleModel(nullptr, page) {
+     AddListItem(
+         ListItem(nullptr, std::u16string(), std::u16string(), false, false, 0));
++  }
++};
++
++class TestCheckboxBubbleModel : public ContentSettingBubbleModel {
++ public:
++  explicit TestCheckboxBubbleModel(content::Page& page)
++      : ContentSettingBubbleModel(nullptr, page) {
++    set_manage_text(u"Change protection");
++    set_manage_text_style(ManageTextStyle::kCheckbox);
++    set_done_button_text(u"Apply");
++  }
++
++  void OnManageCheckboxChecked(bool checked) override {
++    set_done_button_text(checked ? u"Reload" : u"Apply");
+   }
+ };
+ 
+@@ -94,6 +110,18 @@
+ };
+ 
+ namespace {
++views::Checkbox* FindCheckbox(views::View* view) {
++  if (auto* checkbox = views::AsViewClass<views::Checkbox>(view)) {
++    return checkbox;
++  }
++  for (views::View* child : view->children()) {
++    if (auto* checkbox = FindCheckbox(child)) {
++      return checkbox;
++    }
++  }
++  return nullptr;
++}
++
+ void FindLinks(views::View* view, std::vector<views::Link*>* links) {
+   if (views::IsViewClass<views::Link>(view)) {
+     links->push_back(static_cast<views::Link*>(view));
+@@ -103,6 +131,32 @@
+   }
+ }
+ }  // namespace
++
++TEST_F(ContentSettingBubbleContentsTest, CheckboxUpdatesVisibleDoneButton) {
++  content::RenderViewHostTestEnabler test_render_host_factories;
++  auto parent_widget =
++      CreateTestWidget(views::Widget::InitParams::CLIENT_OWNS_WIDGET);
++  parent_widget->Show();
++  auto web_contents =
++      content::WebContentsTester::CreateTestWebContents(profile(), nullptr);
++  auto bubble = std::make_unique<TestContentSettingBubbleContents>(
++      std::make_unique<TestCheckboxBubbleModel>(web_contents->GetPrimaryPage()),
++      web_contents.get(), parent_widget->GetNativeView());
++  auto* bubble_ptr = bubble.get();
++  std::unique_ptr<views::Widget> widget(
++      views::BubbleDialogDelegateView::CreateBubble(std::move(bubble)));
++  widget->Show();
++  auto* checkbox = FindCheckbox(widget->GetContentsView());
++  ASSERT_NE(checkbox, nullptr);
++  EXPECT_EQ(bubble_ptr->GetDialogButtonLabel(ui::mojom::DialogButton::kOk),
++            u"Apply");
++  views::test::ButtonTestApi(checkbox).NotifyDefaultMouseClick();
++  EXPECT_EQ(bubble_ptr->GetDialogButtonLabel(ui::mojom::DialogButton::kOk),
++            u"Reload");
++  views::test::ButtonTestApi(checkbox).NotifyDefaultMouseClick();
++  EXPECT_EQ(bubble_ptr->GetDialogButtonLabel(ui::mojom::DialogButton::kOk),
++            u"Apply");
++}
+ 
+ TEST_F(ContentSettingBubbleContentsTest, BulletUrlLinkElision) {
+   content::RenderViewHostTestEnabler test_render_host_factories;

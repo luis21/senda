@@ -1,6 +1,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -10,6 +11,30 @@ tool = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(tool)
 
 class SnapshotVerification(unittest.TestCase):
+    def test_unchanged_snapshot_preserves_timestamps_but_changes_are_copied(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root/'source'; source.mkdir()
+            manifest = self.fixture(source)
+            header = b'// Controlled exception fixture\n'
+            (source/'CosmeticExceptions.inc').write_bytes(header)
+            manifest['cosmetic_exceptions'] = {'bytes':len(header), 'sha256':hashlib.sha256(header).hexdigest()}
+            (source/'manifest.json').write_text(json.dumps(manifest))
+            tool.sync_snapshot(source, root/'chromium')
+            target = root/'chromium/third_party/senda_filter_lists'
+            for path in target.iterdir():
+                os.utime(path, ns=(1600000000000000000,1600000000000000000))
+            timestamps = {path.name:path.stat().st_mtime_ns for path in target.iterdir()}
+            tool.sync_snapshot(source, root/'chromium')
+            self.assertEqual({path.name:path.stat().st_mtime_ns for path in target.iterdir()},timestamps)
+            changed = b'b'*1024
+            (source/'UnindexedRules').write_bytes(changed)
+            manifest['sha256'] = hashlib.sha256(changed).hexdigest()
+            (source/'manifest.json').write_text(json.dumps(manifest))
+            tool.sync_snapshot(source, root/'chromium')
+            self.assertEqual((target/'UnindexedRules').read_bytes(),changed)
+            self.assertEqual((target/'CosmeticExceptions.inc').stat().st_mtime_ns,timestamps['CosmeticExceptions.inc'])
+
     def fixture(self, root):
         data = b'a'*1024
         (root/'UnindexedRules').write_bytes(data)
