@@ -1,0 +1,650 @@
+diff --git a/chrome/browser/resources/new_tab_page/BUILD.gn b/chrome/browser/resources/new_tab_page/BUILD.gn
+--- a/chrome/browser/resources/new_tab_page/BUILD.gn
++++ b/chrome/browser/resources/new_tab_page/BUILD.gn
+@@ -22,6 +22,7 @@
+ 
+   static_files = [
+     "new_tab_page.html",
++    "senda_home.css",
+     "shared_vars.css",
+   ]
+ 
+@@ -46,7 +47,7 @@
+   }
+ 
+   web_component_files = all_web_component_files
+-  ts_files = all_ts_files
++  ts_files = all_ts_files + [ "senda_home.ts", "senda_home_state.ts" ]
+   css_files = all_css_files
+ 
+   mojo_files_deps = [
+@@ -130,6 +131,7 @@
+     optimize_webui_in_files = [
+       "new_tab_page.js",
+       "lazy_load.js",
++      "senda_home.js",
+     ]
+     optimize_webui_excludes = [
+       "chrome://resources/cr_components/color_change_listener/color_change_listener.mojom-webui.js",
+diff --git a/chrome/browser/resources/new_tab_page/new_tab_page.html b/chrome/browser/resources/new_tab_page/new_tab_page.html
+--- a/chrome/browser/resources/new_tab_page/new_tab_page.html
++++ b/chrome/browser/resources/new_tab_page/new_tab_page.html
+@@ -1,35 +1,61 @@
+ <!doctype html>
+-<html dir="$i18n{textdirection}" lang="$i18n{language}" $i18n{roundedIconsAttribute} $i18n{webuiRoundedIconsAttribute}>
+-  <head>
+-    <meta charset="utf-8">
+-    <title>$i18n{title}</title>
+-    <style>
+-      body {
+-        background: $i18n{backgroundColor};
+-        margin: 0;
+-      }
+-
+-      #backgroundImage {
+-        border: none;
+-        height: 100%;
+-        pointer-events: none;
+-        position: fixed;
+-        top: 0;
+-        visibility: hidden;
+-        width: 100%;
+-      }
+-
+-      [show-background-image] #backgroundImage {
+-        visibility: visible;
+-      }
+-    </style>
+-  </head>
+-  <body>
+-    <iframe id="backgroundImage" src="$i18nRaw{backgroundImageUrl}"></iframe>
+-    <ntp-app></ntp-app>
+-    <script type="module" src="new_tab_page.js"></script>
+-    <link rel="stylesheet" href="chrome://resources/css/text_defaults_md.css">
+-    <link rel="stylesheet" href="chrome://theme/colors.css?sets=ui,chrome">
+-    <link rel="stylesheet" href="shared_vars.css">
+-  </body>
++<html lang="es" dir="ltr">
++<head>
++  <meta charset="utf-8">
++  <meta name="viewport" content="width=device-width,initial-scale=1">
++  <meta name="color-scheme" content="light dark">
++  <title>Nueva pestaña</title>
++  <link rel="stylesheet" href="senda_home.css">
++  <script type="module" src="senda_home.js"></script>
++</head>
++<body>
++  <header class="topbar">
++    <a class="brand" href="#search" aria-label="Senda, ir al buscador">
++      <svg viewBox="0 0 40 40" aria-hidden="true"><path d="M29 8H18a8 8 0 0 0 0 16h4a4 4 0 0 1 0 8H11"/><circle cx="29" cy="8" r="3"/><circle cx="11" cy="32" r="3"/></svg>
++      <span>Senda</span>
++    </a>
++    <button id="customize" class="text-button" type="button" aria-haspopup="dialog">
++      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16M9 4v6m6 4v6"/></svg>
++      Personalizar
++    </button>
++  </header>
++  <main>
++    <section class="journey" aria-labelledby="heading">
++      <p class="intro">Un nuevo comienzo.</p>
++      <h1 id="heading">¿A dónde vamos?</h1>
++      <form id="search-form" role="search">
++        <label for="search" class="sr-only">Buscar en la web</label>
++        <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>
++        <input id="search" type="search" placeholder="Busca algo que te inspire" autocomplete="off" spellcheck="false" required>
++        <button class="search-submit" type="submit" aria-label="Buscar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button>
++      </form>
++      <p class="engine-note">Buscar con <span id="engine-name">DuckDuckGo</span></p>
++    </section>
++    <section class="sites" aria-labelledby="sites-heading">
++      <div class="section-heading"><h2 id="sites-heading">Tus sitios</h2><button id="add-link" class="text-button" type="button" aria-haspopup="dialog">+ Añadir acceso</button></div>
++      <div id="links" class="links"></div>
++      <div id="empty" class="empty"><span class="empty-symbol" aria-hidden="true">↗</span><p>Lo que visitas, más cerca.</p><span>Añade tus sitios favoritos para tenerlos a mano.</span></div>
++    </section>
++    <p id="status" role="status" aria-live="polite"></p>
++  </main>
++  <dialog id="settings-dialog" aria-labelledby="settings-heading">
++    <form id="settings-form">
++      <div class="dialog-heading"><h2 id="settings-heading">A tu manera</h2><button class="close text-button" type="button" data-close="settings-dialog" aria-label="Cerrar personalización">×</button></div>
++      <p class="dialog-copy">Un espacio cómodo para empezar.</p>
++      <label for="theme">Apariencia</label><select id="theme"><option value="system">Seguir el sistema</option><option value="light">Claro</option><option value="dark">Oscuro</option></select>
++      <label for="engine">Buscador de esta página</label><select id="engine"><option value="duckduckgo">DuckDuckGo</option><option value="google">Google</option><option value="bing">Bing</option></select>
++      <p class="field-note">Tus preferencias se guardan en este perfil.</p>
++      <div class="dialog-actions"><button type="button" class="secondary" data-close="settings-dialog">Cancelar</button><button type="submit" class="primary">Guardar</button></div>
++    </form>
++  </dialog>
++  <dialog id="link-dialog" aria-labelledby="link-heading">
++    <form id="link-form">
++      <div class="dialog-heading"><h2 id="link-heading">Añadir acceso</h2><button class="close text-button" type="button" data-close="link-dialog" aria-label="Cerrar editor de acceso">×</button></div>
++      <label for="link-title">Nombre</label><input id="link-title" maxlength="40" autocomplete="off" placeholder="El nombre de tu sitio" required>
++      <label for="link-url">Dirección</label><input id="link-url" type="text" inputmode="url" autocomplete="off" placeholder="https://ejemplo.com" required aria-describedby="link-error">
++      <p id="link-error" role="alert"></p>
++      <div class="dialog-actions"><button id="remove-link" type="button" class="danger" hidden>Eliminar</button><span class="spacer"></span><button type="button" class="secondary" data-close="link-dialog">Cancelar</button><button type="submit" class="primary">Guardar</button></div>
++    </form>
++  </dialog>
++</body>
+ </html>
+diff --git a/chrome/browser/resources/new_tab_page/senda_home.css b/chrome/browser/resources/new_tab_page/senda_home.css
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/resources/new_tab_page/senda_home.css
+@@ -0,0 +1,346 @@
++:root{color-scheme:light;
++--bg:#f2f6fc;
++--surface:#fff;
++--ink:#1d2d44;
++--muted:#5b6c83;
++--accent:#285db5;
++--soft:#e5edfa;
++--line:#ccd8e8;
++--shadow:0 12px 42px #263e6610;
++--error:#a62938;
++font-family:'Segoe UI Variable','Segoe UI',sans-serif;
++color:var(--ink);
++background:var(--bg);}
++@media(prefers-color-scheme: dark){:root:not([data-theme=light]){color-scheme:dark;
++--bg:#182231;
++--surface:#202e42;
++--ink:#e5edf8;
++--muted:#a9b9ce;
++--accent:#9bbfff;
++--soft:#2b3e59;
++--line:#41536d;
++--shadow:0 12px 42px #0002;
++--error:#ffabb5;}}
++
++:root[data-theme=dark]{color-scheme:dark;
++--bg:#182231;
++--surface:#202e42;
++--ink:#e5edf8;
++--muted:#a9b9ce;
++--accent:#9bbfff;
++--soft:#2b3e59;
++--line:#41536d;
++--shadow:0 12px 42px #0002;
++--error:#ffabb5;}
++
++*{box-sizing:border-box;}
++
++body{margin:0;
++min-height:100vh;}
++
++button,
++input,
++select{font:inherit;}
++
++button,
++a,
++input,
++select{ -webkit-tap-highlight-color:transparent;}
++
++button{cursor:pointer;}
++
++svg{width:24px;
++height:24px;
++fill:none;
++stroke:currentColor;
++stroke-width:1.6;
++stroke-linecap:round;
++stroke-linejoin:round;
++flex:none;}
++
++button:focus-visible,
++a:focus-visible,
++input:focus-visible,
++select:focus-visible{outline:3px solid var(--accent);
++outline-offset:4px;}
++
++a{color:inherit;
++text-decoration:none;}
++
++.topbar{display:flex;
++align-items:center;
++justify-content:space-between;
++padding:30px 48px;}
++
++.brand{display:flex;
++align-items:center;
++gap:10px;
++font-size:27px;
++font-weight:600;
++letter-spacing:-1px;}
++
++.brand svg{width:36px;
++height:36px;
++color:var(--accent);
++stroke-width:2.3;}
++
++.text-button{display:inline-flex;
++align-items:center;
++justify-content:center;
++gap:8px;
++padding:10px 12px;
++border:0;
++border-radius:8px;
++color:var(--muted);
++background:transparent;
++font-size:14px;}
++
++.text-button:hover{background:var(--soft);
++color:var(--ink);}
++
++main{max-width:800px;
++margin:0 auto;
++padding:0 36px 30px;}
++
++.journey{padding:64px 0 0;}
++
++.intro{margin:0 0 12px;
++color:var(--muted);
++font-size:16px;}
++
++h1{font-size:clamp(36px,5vw,60px);
++line-height:1.15;
++font-weight:400;
++letter-spacing:-2.4px;
++margin:0 0 34px;}
++
++#search-form{display:flex;
++align-items:center;
++gap:14px;
++padding:10px 12px 10px 22px;
++min-height:74px;
++background:var(--surface);
++border:1px solid var(--line);
++border-radius:18px;
++box-shadow:var(--shadow);}
++
++#search-form:focus-within{border-color:var(--accent);}
++
++.search-icon{color:var(--muted);
++width:22px;}
++
++#search{min-width:0;
++flex:1;
++border:0;
++outline:none;
++background:transparent;
++color:var(--ink);
++padding:10px 0;
++font-size:17px;}
++
++#search:focus-visible{outline:none;}
++
++#search::placeholder{color:var(--muted);
++opacity:1;}
++
++.search-submit{border:0;
++border-radius:12px;
++background:var(--soft);
++color:var(--accent);
++height:48px;
++width:48px;
++display:grid;
++place-items:center;}
++
++.search-submit:hover{filter:brightness(.96);}
++
++.engine-note{font-size:12px;
++margin:13px 0 0;
++color:var(--muted);}
++
++.engine-note span{color:var(--ink);}
++
++.sites{margin-top:56px;}
++
++.section-heading{display:flex;
++align-items:center;
++justify-content:space-between;
++gap:12px;
++border-bottom:1px solid var(--line);
++padding-bottom:12px;}
++
++h2{font-size:17px;
++font-weight:600;
++margin:0;}
++
++.links{display:grid;
++grid-template-columns:repeat(4,minmax(0,1fr));
++gap:14px;
++margin-top:22px;}
++
++.site{position:relative;
++min-width:0;}
++
++.site a{display:flex;
++flex-direction:column;
++align-items:center;
++gap:11px;
++padding:14px 8px 12px;
++border-radius:12px;
++min-height:122px;}
++
++.site a:hover{background:var(--soft);}
++
++.monogram{display:grid;
++place-items:center;
++width:48px;
++height:48px;
++border:1px solid var(--line);
++border-radius:15px;
++background:var(--surface);
++color:var(--accent);
++font-size:18px;
++font-weight:600;}
++
++.site-name{max-width:100%;
++overflow:hidden;
++white-space:nowrap;
++text-overflow:ellipsis;
++font-size:13px;}
++
++.edit{position:absolute;
++right:2px;
++top:0;
++width:28px;
++height:28px;
++padding:0;
++font-size:17px;
++opacity:0;}
++
++.site:hover .edit,
++.site:focus-within .edit{opacity:1;}
++
++.empty{text-align:center;
++padding:26px 10px 18px;
++color:var(--muted);}
++
++.empty-symbol{display:block;
++font-size:31px;
++color:var(--accent);
++line-height:1;}
++
++.empty p{margin:12px 0 6px;
++color:var(--ink);
++font-size:16px;}
++
++.empty>span:last-child{font-size:13px;}
++
++#status{color:var(--muted);
++font-size:13px;
++line-height:1.5;
++min-height:20px;
++margin:26px 0 0;}
++
++dialog{padding:26px;
++border:1px solid var(--line);
++border-radius:20px;
++background:var(--surface);
++color:var(--ink);
++width:min(440px,calc(100% - 32px));
++box-shadow:0 28px 90px #0003;}
++
++dialog::backdrop{background:#0b1a3459;
++backdrop-filter:blur(4px);}
++
++.dialog-heading{display:flex;
++align-items:center;
++justify-content:space-between;
++gap:12px;}
++
++.dialog-heading h2{font-size:23px;
++font-weight:500;
++letter-spacing:-.5px;}
++
++.close{padding:0;
++width:30px;
++height:30px;
++font-size:26px;}
++
++.dialog-copy{color:var(--muted);
++font-size:14px;
++margin:8px 0 24px;}
++
++dialog label{display:block;
++font-size:13px;
++margin:21px 0 8px;}
++
++dialog input,
++dialog select{width:100%;
++padding:12px;
++border:1px solid var(--line);
++border-radius:9px;
++background:var(--bg);
++color:var(--ink);
++font-size:14px;}
++
++.field-note{font-size:12px;
++color:var(--muted);
++line-height:1.5;
++margin:18px 0;}
++
++.dialog-actions{display:flex;
++justify-content:flex-end;
++align-items:center;
++gap:10px;
++margin-top:25px;}
++
++.primary,
++.secondary,
++.danger{padding:10px 16px;
++border-radius:9px;
++font-size:14px;}
++
++.primary{color:var(--surface);
++background:var(--accent);
++border:1px solid var(--accent);
++font-weight:600;}
++
++.secondary{background:transparent;
++color:var(--ink);
++border:1px solid var(--line);}
++
++.danger{background:transparent;
++color:var(--error);
++border:0;
++padding-left:0;}
++
++.spacer{flex:1;}
++
++#link-error{color:var(--error);
++font-size:13px;
++min-height:16px;
++line-height:1.5;}
++
++[hidden]{display:none!important;}
++
++.sr-only{position:absolute;
++width:1px;
++height:1px;
++padding:0;
++margin:-1px;
++overflow:hidden;
++clip-path:inset(50%);
++white-space:nowrap;
++border:0;}
++@media(max-width: 600px){.topbar{padding:22px 20px;}.topbar>.text-button{font-size:0;
++gap:0;}.topbar>.text-button svg{width:23px;}main{padding:0 22px 28px;}.journey{padding-top:52px;}h1{letter-spacing:-1.5px;
++font-size:39px;
++margin-bottom:28px;}#search-form{padding-left:15px;
++gap:10px;
++min-height:66px;
++border-radius:15px;}#search{font-size:15px;}.search-submit{width:40px;
++height:40px;}.sites{margin-top:42px;}.links{grid-template-columns:repeat(3,minmax(0,1fr));
++gap:5px;}.edit{opacity:1;}.dialog-actions{gap:8px;}.primary,
++.secondary{padding:10px 13px;}}
++@media(prefers-reduced-motion: no-preference){button,
++a{transition:background-color .12s,color .12s;}.edit{transition:opacity .12s;}}
+diff --git a/chrome/browser/resources/new_tab_page/senda_home.ts b/chrome/browser/resources/new_tab_page/senda_home.ts
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/resources/new_tab_page/senda_home.ts
+@@ -0,0 +1,109 @@
++// Copyright 2026 Senda contributors. All rights reserved.
++import {normalizeUrl, normalizeState, searchUrl, readState, writeState} from './senda_home_state.js';
++function $(id: string): HTMLElement {
++  const element = document.getElementById(id);
++  if (!element) throw Error('Missing Senda element: ' + id);
++  return element;
++}
++function input(id: string): HTMLInputElement {
++  const element = $(id);
++  if (!(element instanceof HTMLInputElement)) throw Error('Expected input: ' + id);
++  return element;
++}
++function select(id: string): HTMLSelectElement {
++  const element = $(id);
++  if (!(element instanceof HTMLSelectElement)) throw Error('Expected select: ' + id);
++  return element;
++}
++function dialog(id: string): HTMLDialogElement {
++  const element = $(id);
++  if (!(element instanceof HTMLDialogElement)) throw Error('Expected dialog: ' + id);
++  return element;
++}
++function button(id: string): HTMLButtonElement {
++  const element = $(id);
++  if (!(element instanceof HTMLButtonElement)) throw Error('Expected button: ' + id);
++  return element;
++}
++let storage: Pick<Storage, 'getItem'|'setItem'>;
++try { storage = window.localStorage; }
++catch { storage = {getItem() { throw Error('unavailable'); }, setItem() { throw Error('unavailable'); }}; }
++const loaded = readState(storage);
++let state = loaded.state;
++let editing = -1;
++const names = {duckduckgo: 'DuckDuckGo', google: 'Google', bing: 'Bing'};
++function report(text: string) { $('status').textContent = text; }
++function persist(message: string) {
++  const saved = writeState(storage, state);
++  report(saved ? message : 'No se pudieron guardar los cambios. Puedes seguir usando esta página, pero se perderán al cerrarla.');
++}
++function openLink(index = -1) {
++  editing = index;
++  $('link-heading').textContent = index < 0 ? 'Añadir acceso' : 'Editar acceso';
++  input('link-title').value = state.links[index]?.title || '';
++  input('link-url').value = state.links[index]?.url || '';
++  $('link-error').textContent = '';
++  $('remove-link').hidden = index < 0;
++  dialog('link-dialog').showModal();
++}
++function focusLink(index: number) {
++  const targets = $('links').querySelectorAll<HTMLButtonElement>('.edit');
++  const target = targets[index] || button('add-link');
++  if (!target.disabled) target.focus();
++}
++function render() {
++  document.documentElement.dataset['theme'] = state.theme;
++  $('engine-name').textContent = names[state.engine];
++  $('empty').hidden = state.links.length > 0;
++  button('add-link').disabled = state.links.length >= 12;
++  $('add-link').title = state.links.length >= 12 ? 'Puedes guardar hasta doce accesos' : '';
++  const children = state.links.map((link, index) => {
++    const tile = document.createElement('div'); tile.className = 'site';
++    const a = document.createElement('a'); a.href = link.url; a.title = link.title;
++    const icon = document.createElement('span'); icon.className = 'monogram'; icon.setAttribute('aria-hidden', 'true');
++    icon.textContent = Array.from(link.title).slice(0, 1).join('').toLocaleUpperCase();
++    const label = document.createElement('span'); label.className = 'site-name'; label.textContent = link.title;
++    a.append(icon, label);
++    const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'text-button edit'; edit.textContent = '⋯'; edit.setAttribute('aria-label', 'Editar ' + link.title); edit.addEventListener('click', () => openLink(index));
++    tile.append(a, edit); return tile;
++  });
++  $('links').replaceChildren(...children);
++}
++$('search-form').addEventListener('submit', event => {
++  event.preventDefault();
++  const url = searchUrl(input('search').value, state.engine);
++  if (url) window.location.assign(url);
++});
++$('customize').addEventListener('click', () => {
++  select('theme').value = state.theme; select('engine').value = state.engine;
++  dialog('settings-dialog').showModal();
++});
++$('settings-form').addEventListener('submit', event => {
++  event.preventDefault(); state = normalizeState({...state, theme: select('theme').value, engine: select('engine').value});
++  render(); persist('Preferencias guardadas.'); dialog('settings-dialog').close();
++});
++$('add-link').addEventListener('click', () => openLink());
++$('link-form').addEventListener('submit', event => {
++  event.preventDefault();
++  const url = normalizeUrl(input('link-url').value);
++  if (!url) { $('link-error').textContent = 'Introduce una dirección web HTTP o HTTPS válida, sin contraseñas.'; input('link-url').focus(); return; }
++  if (state.links.some((link, i) => link.url === url && i !== editing)) { $('link-error').textContent = 'Ya tienes un acceso a esta dirección.'; return; }
++  const link = {title: input('link-title').value.trim().slice(0,40) || new URL(url).hostname, url};
++  if (editing >= 0) state.links[editing] = link;
++  else if (state.links.length < 12) state.links.push(link);
++  const savedIndex = editing >= 0 ? editing : state.links.length - 1;
++  render(); persist(editing < 0 ? 'Acceso añadido.' : 'Acceso actualizado.'); dialog('link-dialog').close();
++  focusLink(savedIndex);
++});
++$('remove-link').addEventListener('click', () => {
++  if (editing < 0) return;
++  state.links.splice(editing, 1);
++  const nextIndex = Math.min(editing, state.links.length - 1);
++  render(); persist('Acceso eliminado.'); dialog('link-dialog').close();
++  focusLink(nextIndex);
++});
++for (const close of document.querySelectorAll<HTMLButtonElement>('[data-close]')) {
++  close.addEventListener('click', () => { const id = close.dataset['close']; if (id) dialog(id).close(); });
++}
++render();
++if (loaded.error) report('No se pudieron recuperar las preferencias. Si modificas esta página, intentaremos guardarlas de nuevo.');
+diff --git a/chrome/browser/resources/new_tab_page/senda_home_state.ts b/chrome/browser/resources/new_tab_page/senda_home_state.ts
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/resources/new_tab_page/senda_home_state.ts
+@@ -0,0 +1,54 @@
++// Copyright 2026 Senda contributors. All rights reserved.
++export type Theme = 'system'|'light'|'dark';
++export type Engine = 'duckduckgo'|'google'|'bing';
++export interface Site {title: string; url: string;}
++export interface Preferences {theme: Theme; engine: Engine; links: Site[];}
++export const STORAGE_KEY = 'senda.home.v1';
++export function normalizeUrl(value: unknown): string|null {
++  if (typeof value !== 'string' || !value.trim()) return null;
++  let text = value.trim();
++  if (!/^[a-z][a-z\d+.-]*:/i.test(text)) text = 'https://' + text;
++  try {
++    const url = new URL(text);
++    if (!['https:', 'http:'].includes(url.protocol) || !url.hostname || url.username || url.password) return null;
++    return url.href;
++  } catch { return null; }
++}
++export function normalizeState(value: unknown): Preferences {
++  const input = (value && typeof value === 'object' ? value : {}) as Partial<Preferences>;
++  const state: Preferences = {
++    theme: input.theme === 'dark' || input.theme === 'light' ? input.theme : 'system',
++    engine: input.engine === 'google' || input.engine === 'bing' ? input.engine : 'duckduckgo',
++    links: [],
++  };
++  if (Array.isArray(input.links)) {
++    for (const item of input.links) {
++      const url = normalizeUrl(item?.url);
++      if (!url || state.links.some(link => link.url === url)) continue;
++      const title = typeof item.title === 'string' ? item.title.trim().slice(0, 40) : '';
++      state.links.push({title: title || new URL(url).hostname, url});
++      if (state.links.length === 12) break;
++    }
++  }
++  return state;
++}
++export function searchUrl(query: string, engine: string): string|null {
++  if (!query.trim()) return null;
++  const base: Record<Engine, string> = {duckduckgo: 'https://duckduckgo.com/', google: 'https://www.google.com/search', bing: 'https://www.bing.com/search'};
++  const selected: Engine = engine === 'google' || engine === 'bing' ? engine : 'duckduckgo';
++  const url = new URL(base[selected]);
++  url.searchParams.set('q', query.trim());
++  return url.href;
++}
++export function readState(storage: Pick<Storage, 'getItem'>): {state: Preferences; error: boolean} {
++  try {
++    const text = storage.getItem(STORAGE_KEY);
++    if (!text) return {state: normalizeState(null), error: false};
++    try { return {state: normalizeState(JSON.parse(text)), error: false}; }
++    catch { return {state: normalizeState(null), error: true}; }
++  } catch { return {state: normalizeState(null), error: true}; }
++}
++export function writeState(storage: Pick<Storage, 'setItem'>, state: unknown): boolean {
++  try { storage.setItem(STORAGE_KEY, JSON.stringify(normalizeState(state))); return true; }
++  catch { return false; }
++}

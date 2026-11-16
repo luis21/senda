@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "format": "chromium-unindexed-ruleset",
+  "sources": [
+    {
+      "title": "EasyList",
+      "version": "202611160028",
+      "sha256": "5196bf9b749abe7df559f91443ca50330b1eae824409d5c0e7cf40b5cbe19869",
+      "source_rules": 78540,
+      "url": "https://easylist.to/easylist/easylist.txt"
+    },
+    {
+      "title": "EasyPrivacy",
+      "version": "202611160028",
+      "sha256": "16e26a9ef853640b1b3f1cc39835fd41b4e018f8499bbcacc728d54a53d5af54",
+      "source_rules": 56659,
+      "url": "https://easylist.to/easylist/easyprivacy.txt"
+    }
+  ],
+  "network_rules": 106891,
+  "cosmetic_rules_parsed_but_not_activated": 23845,
+  "sha256": "ed1720911678478563bbf57b27b8246883529cb218aea0244c1e4684a1826b7d",
+  "bytes": 4179410,
+  "license": "CC-BY-SA-3.0",
+  "authors": "The EasyList authors (https://easylist.to/)",
+  "changes": "Converted supported URL rules with Chromium. Unsupported rules are omitted; cosmetic rules are not activated."
+}

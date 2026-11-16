@@ -1,0 +1,187 @@
+diff --git a/chrome/app/BUILD.gn b/chrome/app/BUILD.gn
+index eddd25c932..59887a7569 100644
+--- a/chrome/app/BUILD.gn
++++ b/chrome/app/BUILD.gn
+@@ -172,6 +172,7 @@ static_library("test_support") {
+     "//components/crash/core/app:test_support",
+     "//components/devtools/devtools_pipe",
+     "//components/memory_system",
++    "//components/performance_manager",
+     "//components/startup_metric_utils",
+     "//components/variations/service",
+     "//components/webui/about",
+diff --git a/chrome/app/chrome_main_delegate.cc b/chrome/app/chrome_main_delegate.cc
+index c6dfce70e6..3e081c80da 100644
+--- a/chrome/app/chrome_main_delegate.cc
++++ b/chrome/app/chrome_main_delegate.cc
+@@ -32,6 +32,7 @@
+ #include "base/process/process_handle.h"
+ #include "base/profiler/thread_group_profiler.h"
+ #include "base/rand_util.h"
++#include "base/scoped_add_feature_flags.h"
+ #include "base/strings/string_util.h"
+ #include "base/strings/sys_string_conversions.h"
+ #include "base/strings/utf_string_conversions.h"
+@@ -66,6 +67,7 @@
+ #include "components/crash/core/common/crash_keys.h"
+ #include "components/memory_system/initializer.h"
+ #include "components/memory_system/parameters.h"
++#include "components/performance_manager/public/features.h"
+ #include "components/metrics/persistent_histograms.h"
+ #include "components/sampling_profiler/thread_profiler.h"
+ #include "components/startup_metric_utils/common/startup_metric_utils.h"
+@@ -76,6 +78,7 @@
+ #include "content/public/app/initialize_mojo_core.h"
+ #include "content/public/common/content_client.h"
+ #include "content/public/common/content_constants.h"
++#include "content/public/common/content_features.h"
+ #include "content/public/common/content_paths.h"
+ #include "content/public/common/content_switches.h"
+ #include "content/public/common/main_function_params.h"
+@@ -143,7 +146,6 @@
+ #include "chromeos/ash/components/memory/mglru.h"
+ #include "chromeos/ash/experiences/arc/arc_util.h"
+ #include "chromeos/dbus/constants/dbus_paths.h"
+-#include "content/public/common/content_features.h"
+ #endif  // BUILDFLAG(IS_CHROMEOS)
+ 
+ #if BUILDFLAG(IS_ANDROID)
+@@ -1175,6 +1177,18 @@ void ChromeMainDelegate::SetupTracing() {
+ }
+ 
+ std::optional<int> ChromeMainDelegate::BasicStartupComplete() {
++#if BUILDFLAG(IS_WIN)
++  {
++    // These optional caches trade memory for process reuse. Set Senda's
++    // defaults before field trials can re-enable them, while preserving any
++    // explicit feature choice supplied by the user.
++    base::ScopedAddFeatureFlags senda_flags(
++        base::CommandLine::ForCurrentProcess());
++    senda_flags.DisableIfNotSet(features::kTrackEmptyRendererProcessesForReuse);
++    senda_flags.DisableIfNotSet(
++        performance_manager::features::kTransientKeepAlivePolicy);
++  }
++#endif
+ #if BUILDFLAG(IS_CHROMEOS)
+   ash::BootTimesRecorder::Get()->SaveChromeMainStats();
+ #endif
+diff --git a/chrome/browser/performance_manager/policies/memory_saver_mode_policy.cc b/chrome/browser/performance_manager/policies/memory_saver_mode_policy.cc
+index 76a12a2196..5b0e752a16 100644
+--- a/chrome/browser/performance_manager/policies/memory_saver_mode_policy.cc
++++ b/chrome/browser/performance_manager/policies/memory_saver_mode_policy.cc
+@@ -194,7 +194,12 @@ void MemorySaverModePolicy::DiscardPageTimerCallback(
+         ->GetRegisteredObjectAs<PageDiscardingHelper>()
+         ->ImmediatelyDiscardMultiplePages(
+             {tab_handle->page_node()},
+-            DiscardEligibilityPolicy::DiscardReason::PROACTIVE);
++            DiscardEligibilityPolicy::DiscardReason::PROACTIVE,
++            // The mode's own background timer already supplies this guard.
++            // Keep the separate ten-minute guard for urgent discards, while
++            // allowing Senda's five-minute mode. All other eligibility checks
++            // (forms, media, visible/active tabs and exceptions) still apply.
++            /*ignore_recent_visibility=*/true);
+   }
+ }
+ 
+@@ -202,11 +207,11 @@ base::TimeDelta MemorySaverModePolicy::GetTimeBeforeDiscardForCurrentMode()
+     const {
+   switch (mode_) {
+     case MemorySaverModeAggressiveness::kConservative:
+-      return base::Hours(6);
++      return base::Minutes(60);
+     case MemorySaverModeAggressiveness::kMedium:
+-      return base::Hours(4);
++      return base::Minutes(15);
+     case MemorySaverModeAggressiveness::kAggressive:
+-      return base::Hours(2);
++      return base::Minutes(5);
+   }
+   NOTREACHED();
+ }
+diff --git a/chrome/browser/performance_manager/policies/memory_saver_mode_policy_unittest.cc b/chrome/browser/performance_manager/policies/memory_saver_mode_policy_unittest.cc
+index 8bec6b5b37..524c5c7e19 100644
+--- a/chrome/browser/performance_manager/policies/memory_saver_mode_policy_unittest.cc
++++ b/chrome/browser/performance_manager/policies/memory_saver_mode_policy_unittest.cc
+@@ -19,9 +19,9 @@ namespace performance_manager::policies {
+ namespace {
+ // These discard timeouts are based on the values in
+ // `MemorySaverModePolicy::GetTimeBeforeDiscardForCurrentMode`.
+-constexpr base::TimeDelta AGGRESSIVE_TIMEOUT = base::Hours(2);
+-constexpr base::TimeDelta MEDIUM_TIMEOUT = base::Hours(4);
+-constexpr base::TimeDelta CONSERVATIVE_TIMEOUT = base::Hours(6);
++constexpr base::TimeDelta AGGRESSIVE_TIMEOUT = base::Minutes(5);
++constexpr base::TimeDelta MEDIUM_TIMEOUT = base::Minutes(15);
++constexpr base::TimeDelta CONSERVATIVE_TIMEOUT = base::Minutes(60);
+ }  // namespace
+ 
+ class TestTabRevisitTracker : public TabRevisitTracker {
+@@ -181,8 +181,8 @@ TEST_F(MemorySaverModeTest, DontDiscardAfterBackgroundedIfSuspended) {
+   task_env().SuspendedFastForwardBy(base::Hours(10));
+   ::testing::Mock::VerifyAndClearExpectations(discarder());
+ 
+-  // Advance only one hour, there should still not be a discard.
+-  task_env().FastForwardBy(base::Hours(1));
++  // Advance only one minute, there should still not be a discard.
++  task_env().FastForwardBy(base::Minutes(1));
+   ::testing::Mock::VerifyAndClearExpectations(discarder());
+ 
+   // Suspend again for more than the expected time, no discard should happen.
+@@ -194,7 +194,7 @@ TEST_F(MemorySaverModeTest, DontDiscardAfterBackgroundedIfSuspended) {
+ 
+   // Finally advance un-suspended until the time is elapsed, the tab should be
+   // discarded.
+-  task_env().FastForwardBy(MEDIUM_TIMEOUT - base::Hours(1));
++  task_env().FastForwardBy(MEDIUM_TIMEOUT - base::Minutes(1));
+   ::testing::Mock::VerifyAndClearExpectations(discarder());
+ }
+ 
+diff --git a/components/performance_manager/user_tuning/prefs.cc b/components/performance_manager/user_tuning/prefs.cc
+index 8effd2c5e0..a1d12c38c5 100644
+--- a/components/performance_manager/user_tuning/prefs.cc
++++ b/components/performance_manager/user_tuning/prefs.cc
+@@ -32,7 +32,7 @@ void RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
+       kMemorySaverModeTimeBeforeDiscardInMinutes,
+       kDefaultMemorySaverModeTimeBeforeDiscardInMinutes);
+   registry->RegisterIntegerPref(
+-      kMemorySaverModeState, static_cast<int>(MemorySaverModeState::kDisabled));
++      kMemorySaverModeState, static_cast<int>(MemorySaverModeState::kEnabled));
+   registry->RegisterIntegerPref(
+       kMemorySaverModeAggressiveness,
+       static_cast<int>(MemorySaverModeAggressiveness::kMedium));
+diff --git a/components/performance_manager/user_tuning/prefs_unittest.cc b/components/performance_manager/user_tuning/prefs_unittest.cc
+index 7c350fb469..6779eb6608 100644
+--- a/components/performance_manager/user_tuning/prefs_unittest.cc
++++ b/components/performance_manager/user_tuning/prefs_unittest.cc
+@@ -63,7 +63,7 @@ TEST_F(MemorySaverModePrefMigrationTest,
+   pref_service_.SetBoolean(kMemorySaverModeEnabled, true);
+ 
+   EXPECT_EQ(pref_service_.GetInteger(kMemorySaverModeState),
+-            static_cast<int>(MemorySaverModeState::kDisabled));
++            static_cast<int>(MemorySaverModeState::kEnabled));
+   EXPECT_TRUE(
+       pref_service_.FindPreference(kMemorySaverModeState)->IsDefaultValue());
+ 
+@@ -87,7 +87,7 @@ TEST_F(MemorySaverModePrefMigrationTest,
+   pref_service_.SetBoolean(kMemorySaverModeEnabled, false);
+ 
+   EXPECT_EQ(pref_service_.GetInteger(kMemorySaverModeState),
+-            static_cast<int>(MemorySaverModeState::kDisabled));
++            static_cast<int>(MemorySaverModeState::kEnabled));
+   EXPECT_TRUE(
+       pref_service_.FindPreference(kMemorySaverModeState)->IsDefaultValue());
+ 
+diff --git a/content/public/common/content_features.cc b/content/public/common/content_features.cc
+index 499ba9f14a..ddca9a0c2b 100644
+--- a/content/public/common/content_features.cc
++++ b/content/public/common/content_features.cc
+@@ -1233,7 +1233,9 @@ const base::FeatureParam<int> kTouchDragMovementThresholdDip{
+ // when a new renderer process is needed. Currently, only background renderer
+ // processes are considered for reuse.
+ BASE_FEATURE(kTrackEmptyRendererProcessesForReuse,
+-#if BUILDFLAG(IS_ANDROID)
++// Senda prioritizes releasing idle renderer memory on Windows over caching
++// empty processes for subsequent navigations. Site isolation is unchanged.
++#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_WIN)
+              base::FEATURE_DISABLED_BY_DEFAULT
+ #else
+              base::FEATURE_ENABLED_BY_DEFAULT

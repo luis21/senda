@@ -1,0 +1,589 @@
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index 5aa5b0447d..94a20b485e 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -1246,6 +1246,7 @@ source_set("core") {
+     "//components/visited_url_ranking/public",
+     "//components/web_resource",
+     "//components/webui/chrome_urls",
++    "//crypto",
+     "//device/base",
+     "//device/gamepad/public/cpp:switches",
+     "//media/capture:capture_switches",
+diff --git a/chrome/browser/browser_process_impl.cc b/chrome/browser/browser_process_impl.cc
+index bed9453f15..3974ed53cc 100644
+--- a/chrome/browser/browser_process_impl.cc
++++ b/chrome/browser/browser_process_impl.cc
+@@ -29,6 +29,7 @@
+ #include "base/path_service.h"
+ #include "base/run_loop.h"
+ #include "base/synchronization/waitable_event.h"
++#include "base/strings/string_number_conversions.h"
+ #include "base/task/sequenced_task_runner.h"
+ #include "base/task/single_thread_task_runner.h"
+ #include "base/task/task_traits.h"
+@@ -78,6 +79,9 @@
+ #include "chrome/browser/policy/chrome_browser_policy_connector.h"
+ #include "chrome/browser/prefs/browser_prefs.h"
+ #include "chrome/browser/prefs/chrome_pref_service_factory.h"
++#include "chrome/grit/browser_resources.h"
++#include "crypto/hash.h"
++#include "ui/base/resource/resource_bundle.h"
+ #include "chrome/browser/printing/background_printing_manager.h"
+ #include "chrome/browser/printing/print_job_manager.h"
+ #include "chrome/browser/profiles/profile_manager.h"
+@@ -1842,6 +1846,20 @@ void BrowserProcessImpl::CreateSubresourceFilterRulesetService() {
+           subresource_filter::kSafeBrowsingRulesetConfig, local_state(),
+           user_data_dir,
+           subresource_filter::SafeBrowsingRulesetPublisher::Factory());
++  // The packaged snapshot is available offline. The native ruleset service
++  // indexes it in the background and retains the last successfully published
++  // version if indexing fails. Content hashes also make list versions safe
++  // directory names without trusting any downloaded version/path strings.
++  const auto rules = ui::ResourceBundle::GetSharedInstance().GetRawDataResource(
++      IDR_SENDA_NETWORK_RULESET);
++  if (!rules.empty()) {
++    subresource_filter::UnindexedRulesetInfo info;
++    info.content_version =
++        "senda-" + base::HexEncodeLower(crypto::hash::Sha256(rules));
++    info.resource_id = IDR_SENDA_NETWORK_RULESET;
++    subresource_filter_ruleset_service_
++        ->InstallBundledRuleset(info);
++  }
+ }
+ 
+ #if !BUILDFLAG(IS_ANDROID)
+diff --git a/chrome/browser/browser_resources.grd b/chrome/browser/browser_resources.grd
+index e8b4901c99..83cec27a5d 100644
+--- a/chrome/browser/browser_resources.grd
++++ b/chrome/browser/browser_resources.grd
+@@ -212,6 +212,7 @@
+         <!-- FedCM -->
+         <part file="ui/views/webid/resources/webid_resources.grdp" />
+       </if>
++      <include name="IDR_SENDA_NETWORK_RULESET" file="../../third_party/senda_filter_lists/UnindexedRules" type="BINDATA" />
+     </includes>
+   </release>
+ </grit>
+diff --git a/chrome/browser/chrome_content_browser_client_navigation_throttles.cc b/chrome/browser/chrome_content_browser_client_navigation_throttles.cc
+index dfa341dccc..cc8586f503 100644
+--- a/chrome/browser/chrome_content_browser_client_navigation_throttles.cc
++++ b/chrome/browser/chrome_content_browser_client_navigation_throttles.cc
+@@ -5,12 +5,18 @@
+ #include "chrome/browser/chrome_content_browser_client_navigation_throttles.h"
+ 
+ #include "base/command_line.h"
++#include "base/callback_list.h"
+ #include "base/feature_list.h"
++#include "base/functional/bind.h"
++#include "base/memory/weak_ptr.h"
++#include "base/time/time.h"
++#include "base/timer/timer.h"
+ #include "build/build_config.h"
+ #include "build/buildflag.h"
+ #include "chrome/browser/actor/actor_navigation_throttle.h"
+ #include "chrome/browser/autocomplete/aim_eligibility_refresh_navigation_throttle.h"
+ #include "chrome/browser/browser_process.h"
++#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
+ #include "chrome/browser/contextual_tasks/contextual_tasks_navigation_throttle.h"
+ #include "chrome/browser/contextual_tasks/guest_opener_user_data.h"
+ #include "chrome/browser/custom_handlers/chrome_protocol_handler_navigation_throttle.h"
+@@ -50,6 +56,9 @@
+ #include "components/captive_portal/content/captive_portal_service.h"
+ #include "components/captive_portal/core/buildflags.h"
+ #include "components/contextual_tasks/public/features.h"
++#include "components/content_settings/core/browser/host_content_settings_map.h"
++#include "components/content_settings/core/common/content_settings.h"
++#include "components/content_settings/core/common/content_settings_types.h"
+ #include "components/custom_handlers/protocol_handler_navigation_throttle.h"
+ #include "components/dom_distiller/content/browser/distiller_page_web_contents.h"
+ #include "components/dom_distiller/content/browser/distiller_referrer_throttle.h"
+@@ -70,10 +79,13 @@
+ #include "components/security_interstitials/content/ssl_error_handler.h"
+ #include "components/security_interstitials/content/ssl_error_navigation_throttle.h"
+ #include "components/subresource_filter/content/browser/content_subresource_filter_throttle_manager.h"
++#include "components/subresource_filter/content/browser/ruleset_service.h"
++#include "components/subresource_filter/core/browser/subresource_filter_features.h"
+ #include "components/tabs/public/tab_interface.h"
+ #include "components/user_prefs/user_prefs.h"
+ #include "components/webapps/browser/web_contents/web_app_url_loader.h"
+ #include "content/public/browser/navigation_handle.h"
++#include "content/public/browser/navigation_throttle.h"
+ #include "content/public/browser/navigation_throttle_registry.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/common/content_switches.h"
+@@ -194,6 +206,68 @@
+ 
+ namespace {
+ 
++// Hold the first web navigation until the packaged rules have been verified
++// and distributed. Internal pages remain available if protection cannot start.
++class SendaProtectionReadyThrottle : public content::NavigationThrottle {
++ public:
++  explicit SendaProtectionReadyThrottle(
++      content::NavigationThrottleRegistry& registry)
++      : content::NavigationThrottle(registry) {}
++
++  ThrottleCheckResult WillStartRequest() override { return CheckReadiness(); }
++  ThrottleCheckResult WillRedirectRequest() override { return CheckReadiness(); }
++  const char* GetNameForLogging() override {
++    return "SendaProtectionReadyThrottle";
++  }
++
++ private:
++  ThrottleCheckResult CheckReadiness() {
++    const GURL& url = navigation_handle()->GetURL();
++    if (!url.SchemeIsHTTPOrHTTPS() ||
++        !base::FeatureList::IsEnabled(
++            subresource_filter::kSafeBrowsingSubresourceFilter)) {
++      return PROCEED;
++    }
++    Profile* profile = Profile::FromBrowserContext(
++        navigation_handle()->GetWebContents()->GetBrowserContext());
++    if (HostContentSettingsMapFactory::GetForProfile(profile)->GetContentSetting(
++            url, GURL(), ContentSettingsType::ADS) == CONTENT_SETTING_ALLOW) {
++      return PROCEED;
++    }
++    auto* service = g_browser_process->subresource_filter_ruleset_service();
++    if (service && service->HasPublishedRuleset()) {
++      return PROCEED;
++    }
++    if (service) {
++      subscription_ = service->WhenRulesetReady(
++          base::BindOnce(&SendaProtectionReadyThrottle::OnReady,
++                         weak_factory_.GetWeakPtr()));
++    }
++    timeout_.Start(FROM_HERE, base::Seconds(30), this,
++                   &SendaProtectionReadyThrottle::OnTimeout);
++    return DEFER;
++  }
++
++  void OnReady() {
++    timeout_.Stop();
++    Resume();
++  }
++
++  void OnTimeout() {
++    CancelDeferredNavigation(
++        {CANCEL, net::ERR_BLOCKED_BY_CLIENT,
++         std::string("<!doctype html><html lang=es><meta charset=utf-8>"
++                     "<title>Senda: proteccion no disponible</title>"
++                     "<h1>La proteccion todavia no esta lista</h1>"
++                     "<p>Recarga la pagina o reinicia Senda para volver a "
++                     "intentarlo.</p></html>")});
++  }
++
++  base::CallbackListSubscription subscription_;
++  base::OneShotTimer timeout_;
++  base::WeakPtrFactory<SendaProtectionReadyThrottle> weak_factory_{this};
++};
++
+ // Wrapper for SSLErrorHandler::HandleSSLError() that supplies //chrome-level
+ // parameters.
+ void HandleSSLErrorWrapper(
+@@ -297,6 +371,8 @@ void CreateAndAddChromeThrottlesForNavigation(
+     // should be cared by adding an attribute flag to
+     // NavigationThrottleRegistry::AddThrottle().
+     page_load_metrics::MetricsNavigationThrottle::CreateAndAdd(registry);
++    registry.AddThrottle(
++        std::make_unique<SendaProtectionReadyThrottle>(registry));
+ 
+     // Appends the X-Geo header to the navigation request if needed.
+     if (auto throttle =
+diff --git a/chrome/browser/component_updater/registration.cc b/chrome/browser/component_updater/registration.cc
+index 9cf5a226c7..f48e8ec61c 100644
+--- a/chrome/browser/component_updater/registration.cc
++++ b/chrome/browser/component_updater/registration.cc
+@@ -30,7 +30,6 @@
+ #include "chrome/browser/component_updater/privacy_sandbox_attestations_component_installer.h"
+ #include "chrome/browser/component_updater/private_verification_tokens_installer.h"
+ #include "chrome/browser/component_updater/ssl_error_assistant_component_installer.h"
+-#include "chrome/browser/component_updater/subresource_filter_component_installer.h"
+ #include "chrome/browser/component_updater/trust_token_key_commitments_component_installer.h"
+ #include "chrome/browser/history_embeddings/history_embeddings_utils.h"
+ #include "chrome/common/buildflags.h"
+@@ -152,7 +151,8 @@ void RegisterComponentsForUpdate() {
+   RegisterWidevineCdmComponent(cus);
+ #endif  // BUILDFLAG(ENABLE_WIDEVINE_CDM_COMPONENT)
+ 
+-  RegisterSubresourceFilterComponent(cus);
++  // Senda packages its own attributed ad/tracker snapshot. Do not replace it
++  // with Google's narrower advertising rules. Safe Browsing is unchanged.
+   RegisterOnDeviceHeadSuggestComponent(
+       cus, g_browser_process->GetApplicationLocale());
+   RegisterOptimizationHintsComponent(cus);
+diff --git a/chrome/browser/profiles/profile.cc b/chrome/browser/profiles/profile.cc
+index f5c9ae68aa..59493a21d7 100644
+--- a/chrome/browser/profiles/profile.cc
++++ b/chrome/browser/profiles/profile.cc
+@@ -329,7 +329,7 @@ const char Profile::kProfileKey[] = "__PROFILE__";
+ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
+   registry->RegisterBooleanPref(
+       prefs::kSearchSuggestEnabled,
+-      true,
++      false,
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+ #if BUILDFLAG(IS_ANDROID)
+   registry->RegisterStringPref(
+diff --git a/components/content_settings/core/browser/cookie_settings.cc b/components/content_settings/core/browser/cookie_settings.cc
+index 183e84960d..1a4683bc78 100644
+--- a/components/content_settings/core/browser/cookie_settings.cc
++++ b/components/content_settings/core/browser/cookie_settings.cc
+@@ -78,7 +78,7 @@ void CookieSettings::RegisterProfilePrefs(
+     user_prefs::PrefRegistrySyncable* registry) {
+   registry->RegisterIntegerPref(
+       prefs::kCookieControlsMode,
+-      static_cast<int>(CookieControlsMode::kIncognitoOnly),
++      static_cast<int>(CookieControlsMode::kBlockThirdParty),
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+ }
+ 
+diff --git a/components/subresource_filter/content/browser/content_subresource_filter_throttle_manager.cc b/components/subresource_filter/content/browser/content_subresource_filter_throttle_manager.cc
+index e440b4d7a8..2c416e7c34 100644
+--- a/components/subresource_filter/content/browser/content_subresource_filter_throttle_manager.cc
++++ b/components/subresource_filter/content/browser/content_subresource_filter_throttle_manager.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "components/subresource_filter/content/browser/content_subresource_filter_throttle_manager.h"
+ 
++#include <algorithm>
+ #include <utility>
+ 
+ #include "base/check.h"
+@@ -664,7 +665,18 @@ ContentSubresourceFilterThrottleManager::
+   if (IsInSubresourceFilterRoot(&navigation_handle)) {
+     auto throttle = ActivationStateComputingNavigationThrottle::CreateForRoot(
+         registry, kSafeBrowsingRulesetConfig.uma_tag);
+-    if (base::FeatureList::IsEnabled(kAdTagging)) {
++    // With all-sites enforcement the activation notification will arrive after
++    // Senda's startup barrier. Do not cache a pre-publication empty ruleset
++    // handle here while constructing throttles for the first navigation.
++    const auto configs = GetEnabledConfigurations();
++    const bool enforces_all_sites = std::ranges::any_of(
++        configs->configs_by_decreasing_priority(), [](const Configuration& c) {
++          return c.activation_conditions.activation_scope ==
++                     ActivationScope::ALL_SITES &&
++                 c.activation_options.activation_level ==
++                     mojom::ActivationLevel::kEnabled;
++        });
++    if (base::FeatureList::IsEnabled(kAdTagging) && !enforces_all_sites) {
+       mojom::ActivationState ad_tagging_state;
+       ad_tagging_state.activation_level = mojom::ActivationLevel::kDryRun;
+       throttle->NotifyPageActivationWithRuleset(EnsureRulesetHandle(),
+diff --git a/components/subresource_filter/content/browser/ruleset_publisher.cc b/components/subresource_filter/content/browser/ruleset_publisher.cc
+index 457596c596..e42f0337b9 100644
+--- a/components/subresource_filter/content/browser/ruleset_publisher.cc
++++ b/components/subresource_filter/content/browser/ruleset_publisher.cc
+@@ -39,6 +39,16 @@ RulesetPublisher::RulesetPublisher(
+ 
+ RulesetPublisher::~RulesetPublisher() = default;
+ 
++base::CallbackListSubscription RulesetPublisher::WhenRulesetReady(
++    base::OnceClosure callback) {
++  if (HasPublishedRuleset()) {
++    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE, std::move(callback));
++    return {};
++  }
++  return ready_callbacks_.Add(std::move(callback));
++}
++
+ void RulesetPublisher::SetRulesetPublishedCallbackForTesting(
+     base::OnceClosure callback) {
+   ruleset_published_callback_ = std::move(callback);
+@@ -74,6 +84,7 @@ void RulesetPublisher::PublishNewRulesetVersion(RulesetFilePtr ruleset_data) {
+   if (!ruleset_published_callback_.is_null()) {
+     std::move(ruleset_published_callback_).Run();
+   }
++  ready_callbacks_.Notify();
+ }
+ 
+ scoped_refptr<base::SingleThreadTaskRunner>
+diff --git a/components/subresource_filter/content/browser/ruleset_publisher.h b/components/subresource_filter/content/browser/ruleset_publisher.h
+index a9fae3cd0a..f327b2f6f1 100644
+--- a/components/subresource_filter/content/browser/ruleset_publisher.h
++++ b/components/subresource_filter/content/browser/ruleset_publisher.h
+@@ -6,6 +6,7 @@
+ #define COMPONENTS_SUBRESOURCE_FILTER_CONTENT_BROWSER_RULESET_PUBLISHER_H_
+ 
+ #include <memory>
++#include "base/callback_list.h"
+ 
+ #include "base/files/file.h"
+ #include "base/files/file_path.h"
+@@ -68,6 +69,11 @@ class RulesetPublisher : public content::RenderProcessHostCreationObserver {
+ 
+   virtual VerifiedRulesetDealer::Handle* GetRulesetDealer();
+ 
++  bool HasPublishedRuleset() const {
++    return ruleset_data_ && ruleset_data_->IsValid();
++  }
++  base::CallbackListSubscription WhenRulesetReady(base::OnceClosure callback);
++
+   virtual void SetRulesetPublishedCallbackForTesting(
+       base::OnceClosure callback);
+ 
+@@ -94,6 +100,7 @@ class RulesetPublisher : public content::RenderProcessHostCreationObserver {
+ 
+   RulesetFilePtr ruleset_data_{nullptr, base::OnTaskRunnerDeleter{nullptr}};
+   base::OnceClosure ruleset_published_callback_;
++  base::OnceClosureList ready_callbacks_;
+ 
+   std::unique_ptr<VerifiedRulesetDealer::Handle> ruleset_dealer_;
+   scoped_refptr<base::SingleThreadTaskRunner> best_effort_task_runner_;
+diff --git a/components/subresource_filter/content/browser/ruleset_service.cc b/components/subresource_filter/content/browser/ruleset_service.cc
+index 0e6ecd18ab..7acc0170f6 100644
+--- a/components/subresource_filter/content/browser/ruleset_service.cc
++++ b/components/subresource_filter/content/browser/ruleset_service.cc
+@@ -197,10 +197,10 @@ std::unique_ptr<RulesetService> RulesetService::Create(
+           {base::MayBlock(), base::TaskPriority::USER_BLOCKING,
+            base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN}));
+ 
+-  // Runner for tasks that do not influence user experience.
++  // Senda waits for the initial privacy rules before starting HTTP loads.
+   scoped_refptr<base::SequencedTaskRunner> background_task_runner(
+       base::ThreadPool::CreateSequencedTaskRunner(
+-          {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
++          {base::MayBlock(), base::TaskPriority::USER_BLOCKING,
+            base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN}));
+ 
+   base::FilePath indexed_ruleset_base_dir =
+@@ -248,6 +248,18 @@ RulesetService::RulesetService(
+ 
+ RulesetService::~RulesetService() = default;
+ 
++void RulesetService::InstallBundledRuleset(const UnindexedRulesetInfo& info) {
++  CHECK(info.resource_id);
++  bundled_fallback_ = info;
++  bundled_retry_started_ = false;
++  // Do not wait for an idle/best-effort UI task when first navigation needs
++  // this resource. The already posted initialization task becomes a no-op.
++  if (!is_initialized_) {
++    FinishInitialization();
++  }
++  IndexAndStoreAndPublishRulesetIfNeeded(info);
++}
++
+ void RulesetService::IndexAndStoreAndPublishRulesetIfNeeded(
+     const UnindexedRulesetInfo& unindexed_ruleset_info) {
+   if (unindexed_ruleset_info.content_version.empty()) {
+@@ -456,6 +468,9 @@ RulesetService::IndexAndWriteRulesetResult RulesetService::WriteRuleset(
+ }
+ 
+ void RulesetService::FinishInitialization() {
++  if (is_initialized_) {
++    return;
++  }
+   is_initialized_ = true;
+ 
+   IndexedRulesetVersion most_recently_indexed_version(config_.filter_tag);
+@@ -516,6 +531,10 @@ void RulesetService::OnRulesetSet(RulesetFilePtr file) {
+   // always points to an existing version of disk by invalidating the prefs.
+   if (!file->IsValid()) {
+     IndexedRulesetVersion(config_.filter_tag).SaveToPrefs(local_state_);
++    if (!bundled_fallback_.content_version.empty() && !bundled_retry_started_) {
++      bundled_retry_started_ = true;
++      IndexAndStoreAndPublishRulesetIfNeeded(bundled_fallback_);
++    }
+     return;
+   }
+ 
+diff --git a/components/subresource_filter/content/browser/ruleset_service.h b/components/subresource_filter/content/browser/ruleset_service.h
+index 6d4fc7fb03..9e57ac009a 100644
+--- a/components/subresource_filter/content/browser/ruleset_service.h
++++ b/components/subresource_filter/content/browser/ruleset_service.h
+@@ -186,6 +186,14 @@ class RulesetService {
+   virtual void IndexAndStoreAndPublishRulesetIfNeeded(
+       const UnindexedRulesetInfo& unindexed_ruleset_info);
+ 
++  // A packaged fallback is available before startup navigations. Retain it
++  // so a missing or corrupt persisted index can be rebuilt in this session.
++  void InstallBundledRuleset(const UnindexedRulesetInfo& info);
++  bool HasPublishedRuleset() const { return publisher_->HasPublishedRuleset(); }
++  base::CallbackListSubscription WhenRulesetReady(base::OnceClosure callback) {
++    return publisher_->WhenRulesetReady(std::move(callback));
++  }
++
+   // Get the ruleset version associated with the current local_state_.
+   IndexedRulesetVersion GetMostRecentlyIndexedVersion() const;
+ 
+@@ -276,6 +284,8 @@ class RulesetService {
+   std::unique_ptr<RulesetPublisher> publisher_;
+ 
+   UnindexedRulesetInfo queued_unindexed_ruleset_info_;
++  UnindexedRulesetInfo bundled_fallback_;
++  bool bundled_retry_started_ = false;
+   bool is_initialized_;
+ 
+   const base::FilePath indexed_ruleset_base_dir_;
+diff --git a/components/subresource_filter/content/browser/safe_browsing_page_activation_throttle.cc b/components/subresource_filter/content/browser/safe_browsing_page_activation_throttle.cc
+index c81f5435d1..ba92d7b96a 100644
+--- a/components/subresource_filter/content/browser/safe_browsing_page_activation_throttle.cc
++++ b/components/subresource_filter/content/browser/safe_browsing_page_activation_throttle.cc
+@@ -201,6 +201,8 @@ void SafeBrowsingPageActivationThrottle::NotifyResult() {
+       mojom::SubresourceFilterDisabledReason::kUnknown;
+ 
+   if (selection.warning &&
++      selection.config.activation_conditions.activation_scope ==
++          ActivationScope::ACTIVATION_LIST &&
+       activation_level == mojom::ActivationLevel::kEnabled) {
+     NavigationConsoleLogger::LogMessageOnCommit(
+         navigation_handle(), blink::mojom::ConsoleMessageLevel::kWarning,
+diff --git a/components/subresource_filter/core/browser/subresource_filter_features.cc b/components/subresource_filter/core/browser/subresource_filter_features.cc
+index 5a27b46796..93171aafae 100644
+--- a/components/subresource_filter/core/browser/subresource_filter_features.cc
++++ b/components/subresource_filter/core/browser/subresource_filter_features.cc
+@@ -188,6 +188,12 @@ std::vector<Configuration> ParseEnabledConfigurations() {
+   std::vector<Configuration> configs;
+   if (base::FeatureList::IsEnabled(kSafeBrowsingSubresourceFilter)) {
+     configs = FillEnabledPresetConfigurations(&params);
++    // Senda uses its bundled ad/tracker rules on all HTTP(S) sites. Explicit
++    // ADS content settings are still applied by ProfileInteractionManager.
++    Configuration senda(mojom::ActivationLevel::kEnabled,
++                        ActivationScope::ALL_SITES);
++    senda.activation_conditions.priority = 1000;
++    configs.push_back(std::move(senda));
+   }
+ 
+   Configuration experimental_config = ParseExperimentalConfiguration(&params);
+diff --git a/components/subresource_filter/core/browser/verified_ruleset_dealer.cc b/components/subresource_filter/core/browser/verified_ruleset_dealer.cc
+index f576f92ace..7d05dae866 100644
+--- a/components/subresource_filter/core/browser/verified_ruleset_dealer.cc
++++ b/components/subresource_filter/core/browser/verified_ruleset_dealer.cc
+@@ -40,8 +40,17 @@ RulesetFilePtr VerifiedRulesetDealer::OpenAndSetRulesetFile(
+                "VerifiedRulesetDealer::OpenAndSetRulesetFile", "file_valid",
+                file->IsValid());
+   if (file->IsValid()) {
++    // A published file must be verified, not merely openable. Keep the
++    // previous dealer intact when a persisted candidate is corrupt.
++    auto candidate = MemoryMappedRuleset::CreateAndInitialize(file->Duplicate());
++    if (!candidate || !IndexedRulesetMatcher::Verify(
++                          candidate->data(), expected_checksum, config_.uma_tag)) {
++      file->Close();
++      return file;
++    }
+     SetRulesetFile(file->Duplicate());
+     expected_checksum_ = expected_checksum;
++    status_ = RulesetVerificationStatus::kIntact;
+   }
+   return file;
+ }
+diff --git a/components/subresource_filter/core/browser/verified_ruleset_dealer_unittest.cc b/components/subresource_filter/core/browser/verified_ruleset_dealer_unittest.cc
+index be34e334ed..88cd312cc5 100644
+--- a/components/subresource_filter/core/browser/verified_ruleset_dealer_unittest.cc
++++ b/components/subresource_filter/core/browser/verified_ruleset_dealer_unittest.cc
+@@ -290,7 +290,7 @@ TEST_F(SubresourceFilterVerifiedRulesetDealerTest,
+   // Check |OpenAndSetRulesetFile| forwards call to |SetRulesetFile| on success.
+   EXPECT_TRUE(ruleset_dealer()->IsRulesetFileAvailable());
+   EXPECT_FALSE(has_cached_ruleset());
+-  EXPECT_EQ(RulesetVerificationStatus::kNotVerified,
++  EXPECT_EQ(RulesetVerificationStatus::kIntact,
+             ruleset_dealer()->status());
+ 
+   // Check that after getting the ruleset the expected values are present.
+@@ -315,20 +315,9 @@ TEST_F(SubresourceFilterVerifiedRulesetDealerTest,
+   RulesetFilePtr file = ruleset_dealer()->OpenAndSetRulesetFile(
+       expected_checksum, rulesets().indexed_1().path);
+ 
+-  // Check the required file is opened.
+-  ASSERT_TRUE(file->IsValid());
+-
+-  // Check |OpenAndSetRulesetFile| forwards call to |SetRulesetFile| on success.
+-  EXPECT_TRUE(ruleset_dealer()->IsRulesetFileAvailable());
+-  EXPECT_FALSE(has_cached_ruleset());
+-  EXPECT_EQ(RulesetVerificationStatus::kNotVerified,
+-            ruleset_dealer()->status());
+-
+-  // Check that after getting the ruleset the expected values are present.
+-  scoped_refptr<const MemoryMappedRuleset> ref_to_ruleset =
+-      ruleset_dealer()->GetRuleset();
+-  EXPECT_FALSE(ref_to_ruleset);
+-  EXPECT_EQ(RulesetVerificationStatus::kCorrupt, ruleset_dealer()->status());
++  EXPECT_FALSE(file->IsValid());
++  EXPECT_FALSE(ruleset_dealer()->IsRulesetFileAvailable());
++  EXPECT_FALSE(ruleset_dealer()->GetRuleset());
+ }
+ 
+ TEST_F(SubresourceFilterVerifiedRulesetDealerTest,
+@@ -343,7 +332,7 @@ TEST_F(SubresourceFilterVerifiedRulesetDealerTest,
+   // Check |OpenAndSetRulesetFile| forwards call to |SetRulesetFile| on success.
+   EXPECT_TRUE(ruleset_dealer()->IsRulesetFileAvailable());
+   EXPECT_FALSE(has_cached_ruleset());
+-  EXPECT_EQ(RulesetVerificationStatus::kNotVerified,
++  EXPECT_EQ(RulesetVerificationStatus::kIntact,
+             ruleset_dealer()->status());
+ }
+ 
+@@ -357,6 +346,21 @@ TEST_F(SubresourceFilterVerifiedRulesetDealerTest,
+   EXPECT_FALSE(ruleset_dealer()->IsRulesetFileAvailable());
+ }
+ 
++TEST_F(SubresourceFilterVerifiedRulesetDealerTest,
++       CorruptCandidatePreservesPreviouslyVerifiedRuleset) {
++  auto valid = ruleset_dealer()->OpenAndSetRulesetFile(
++      0, rulesets().indexed_1().path);
++  ASSERT_TRUE(valid->IsValid());
++  testing::TestRuleset::CorruptByTruncating(rulesets().indexed_2(), 123);
++  auto invalid = ruleset_dealer()->OpenAndSetRulesetFile(
++      0, rulesets().indexed_2().path);
++  EXPECT_FALSE(invalid->IsValid());
++  auto previous = ruleset_dealer()->GetRuleset();
++  ASSERT_TRUE(previous);
++  EXPECT_EQ(rulesets().indexed_1().contents, ReadRulesetContents(previous.get()));
++  EXPECT_EQ(RulesetVerificationStatus::kIntact, ruleset_dealer()->status());
++}
++
+ // Tests for VerifiedRulesetDealer::Handle. ------------------------------------
+ 
+ namespace {
+@@ -473,7 +477,7 @@ TEST_F(SubresourceFilterVerifiedRulesetDealerHandleTest,
+   task_runner()->RunUntilIdle();
+ 
+   before_set_ruleset.ExpectRulesetState(false);
+-  after_set_ruleset.ExpectRulesetState(true);
++  after_set_ruleset.ExpectRulesetState(true, RulesetVerificationStatus::kIntact);
+   after_warm_up.ExpectRulesetContents(rulesets().indexed_1().contents);
+ }
+ 
+@@ -500,9 +504,9 @@ TEST_F(SubresourceFilterVerifiedRulesetDealerHandleTest, RulesetFileIsUpdated) {
+   dealer_handle.reset(nullptr);
+   task_runner()->RunUntilIdle();
+ 
+-  after_set_ruleset_1.ExpectRulesetState(true);
++  after_set_ruleset_1.ExpectRulesetState(true, RulesetVerificationStatus::kIntact);
+   read_ruleset_1.ExpectRulesetContents(rulesets().indexed_1().contents);
+-  after_set_ruleset_2.ExpectRulesetState(true);
++  after_set_ruleset_2.ExpectRulesetState(true, RulesetVerificationStatus::kIntact);
+   read_ruleset_2.ExpectRulesetContents(rulesets().indexed_2().contents);
+ }
+ 
+@@ -531,7 +535,7 @@ TEST_F(SubresourceFilterVerifiedRulesetDealerHandleTest,
+   dealer_handle.reset(nullptr);
+   task_runner()->RunUntilIdle();
+ 
+-  after_set_ruleset_1.ExpectRulesetState(true);
++  after_set_ruleset_1.ExpectRulesetState(true, RulesetVerificationStatus::kIntact);
+   read_ruleset_1.ExpectRulesetContents(rulesets().indexed_1().contents);
+   after_set_ruleset_2.ExpectRulesetState(true,
+                                          RulesetVerificationStatus::kIntact);
+@@ -758,7 +762,7 @@ TEST_F(SubresourceFilterVerifiedRulesetHandleTest,
+   dealer_handle()->TryOpenAndSetRulesetFile(
+       rulesets().indexed_1().path, /*expected_checksum=*/0,
+       base::BindOnce(
+-          [](RulesetFilePtr file) { EXPECT_TRUE(file->IsValid()); }));
++          [](RulesetFilePtr file) { EXPECT_FALSE(file->IsValid()); }));
+ 
+   auto ruleset_handle = CreateRulesetHandle();
+   dealer_handle()->GetDealerAsync(created_handle.GetCallback());
+@@ -767,9 +771,9 @@ TEST_F(SubresourceFilterVerifiedRulesetHandleTest,
+   dealer_handle()->GetDealerAsync(deleted_handle.GetCallback());
+   task_runner()->RunUntilIdle();
+ 
+-  created_handle.ExpectRulesetState(true, RulesetVerificationStatus::kCorrupt);
++  created_handle.ExpectRulesetState(false, RulesetVerificationStatus::kInvalidFile);
+   read_ruleset.ExpectNoRuleset();
+-  deleted_handle.ExpectRulesetState(true, RulesetVerificationStatus::kCorrupt);
++  deleted_handle.ExpectRulesetState(false, RulesetVerificationStatus::kInvalidFile);
+ }
+ 
+ }  // namespace subresource_filter

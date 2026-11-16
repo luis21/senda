@@ -1,0 +1,17 @@
+.tools/
+.chromium/
+.superpowers/
+.profiles/
+docs/validation/build-status.json
+ui/new-tab/*.js
+**/__pycache__/
+
+.env
+.env.*
+!.env.example
+.vs/
+*.user
+*.suo
+*.pfx
+*.p12
+*.key

@@ -1,0 +1,689 @@
+{
+  "schema": 1,
+  "scenario": "14 local synthetic pages, 32 MiB each, 10 ordinary plus 4 protected",
+  "durationSeconds": 360,
+  "mode": "maximum (5 minutes)",
+  "concurrentRuns": true,
+  "metric": "private committed bytes, whole browser process tree",
+  "engine": {
+    "protocolVersion": "1.3",
+    "product": "Chrome/156.0.8078.80",
+    "revision": "@0000000000000000000000000000000000000000",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+    "jsVersion": "15.6.75.27"
+  },
+  "results": {
+    "control": {
+      "preferences": [
+        {
+          "key": "performance_tuning.high_efficiency_mode.state",
+          "value": 0
+        },
+        {
+          "key": "performance_tuning.high_efficiency_mode.aggressiveness",
+          "value": 2
+        }
+      ],
+      "nativeCacheDefaults": {
+        "emptyRendererReuseDisabled": true,
+        "transientKeepAliveDisabled": true
+      },
+      "samples": [
+        {
+          "label": "loaded",
+          "browserPid": 19988,
+          "capturedUtc": "2026-11-16T02:27:34.1122057Z",
+          "privateBytes": 2337431552,
+          "workingSetBytes": 8436137984,
+          "cpuSeconds": 138.265625,
+          "systemAvailableBytes": 6432559104,
+          "systemTotalBytes": 17128624128,
+          "processes": [
+            {
+              "pid": 19988,
+              "privateBytes": 177180672,
+              "workingSetBytes": 631934976,
+              "cpuSeconds": 46.71875
+            },
+            {
+              "pid": 16716,
+              "privateBytes": 7266304,
+              "workingSetBytes": 19652608,
+              "cpuSeconds": 0.046875
+            },
+            {
+              "pid": 10200,
+              "privateBytes": 248320000,
+              "workingSetBytes": 336154624,
+              "cpuSeconds": 20.171875
+            },
+            {
+              "pid": 16924,
+              "privateBytes": 63647744,
+              "workingSetBytes": 262995968,
+              "cpuSeconds": 3.59375
+            },
+            {
+              "pid": 4576,
+              "privateBytes": 47747072,
+              "workingSetBytes": 206766080,
+              "cpuSeconds": 0.734375
+            },
+            {
+              "pid": 19016,
+              "privateBytes": 118624256,
+              "workingSetBytes": 441475072,
+              "cpuSeconds": 16.53125
+            },
+            {
+              "pid": 13156,
+              "privateBytes": 63119360,
+              "workingSetBytes": 284647424,
+              "cpuSeconds": 1.28125
+            },
+            {
+              "pid": 4388,
+              "privateBytes": 124301312,
+              "workingSetBytes": 466833408,
+              "cpuSeconds": 27.015625
+            },
+            {
+              "pid": 13452,
+              "privateBytes": 100225024,
+              "workingSetBytes": 379449344,
+              "cpuSeconds": 1.40625
+            },
+            {
+              "pid": 9640,
+              "privateBytes": 97202176,
+              "workingSetBytes": 376672256,
+              "cpuSeconds": 1.296875
+            },
+            {
+              "pid": 10196,
+              "privateBytes": 100220928,
+              "workingSetBytes": 379555840,
+              "cpuSeconds": 1.453125
+            },
+            {
+              "pid": 14140,
+              "privateBytes": 97452032,
+              "workingSetBytes": 376754176,
+              "cpuSeconds": 1.3125
+            },
+            {
+              "pid": 1276,
+              "privateBytes": 97132544,
+              "workingSetBytes": 376528896,
+              "cpuSeconds": 1.5
+            },
+            {
+              "pid": 16344,
+              "privateBytes": 97452032,
+              "workingSetBytes": 376692736,
+              "cpuSeconds": 1.390625
+            },
+            {
+              "pid": 22684,
+              "privateBytes": 97804288,
+              "workingSetBytes": 377192448,
+              "cpuSeconds": 1.3125
+            },
+            {
+              "pid": 10780,
+              "privateBytes": 97411072,
+              "workingSetBytes": 376688640,
+              "cpuSeconds": 1.34375
+            },
+            {
+              "pid": 14636,
+              "privateBytes": 99876864,
+              "workingSetBytes": 379371520,
+              "cpuSeconds": 1.265625
+            },
+            {
+              "pid": 22372,
+              "privateBytes": 97169408,
+              "workingSetBytes": 376561664,
+              "cpuSeconds": 1.25
+            },
+            {
+              "pid": 11100,
+              "privateBytes": 99303424,
+              "workingSetBytes": 379793408,
+              "cpuSeconds": 1.5625
+            },
+            {
+              "pid": 10124,
+              "privateBytes": 98074624,
+              "workingSetBytes": 387821568,
+              "cpuSeconds": 1.453125
+            },
+            {
+              "pid": 14788,
+              "privateBytes": 100765696,
+              "workingSetBytes": 387563520,
+              "cpuSeconds": 1.703125
+            },
+            {
+              "pid": 20216,
+              "privateBytes": 99999744,
+              "workingSetBytes": 379400192,
+              "cpuSeconds": 1.3125
+            },
+            {
+              "pid": 15288,
+              "privateBytes": 49037312,
+              "workingSetBytes": 213757952,
+              "cpuSeconds": 1.65625
+            },
+            {
+              "pid": 4216,
+              "privateBytes": 58097664,
+              "workingSetBytes": 261873664,
+              "cpuSeconds": 0.953125
+            }
+          ],
+          "missingProcessCount": 0
+        },
+        {
+          "label": "idle",
+          "browserPid": 19988,
+          "capturedUtc": "2026-11-16T02:33:36.3784689Z",
+          "privateBytes": 2450808832,
+          "workingSetBytes": 8590319616,
+          "cpuSeconds": 677.328125,
+          "systemAvailableBytes": 7367823360,
+          "systemTotalBytes": 17128624128,
+          "processes": [
+            {
+              "pid": 19988,
+              "privateBytes": 260071424,
+              "workingSetBytes": 730095616,
+              "cpuSeconds": 160.5625
+            },
+            {
+              "pid": 16716,
+              "privateBytes": 7147520,
+              "workingSetBytes": 19644416,
+              "cpuSeconds": 0.0625
+            },
+            {
+              "pid": 10200,
+              "privateBytes": 221552640,
+              "workingSetBytes": 341168128,
+              "cpuSeconds": 67.9375
+            },
+            {
+              "pid": 16924,
+              "privateBytes": 58929152,
+              "workingSetBytes": 256278528,
+              "cpuSeconds": 19.15625
+            },
+            {
+              "pid": 4576,
+              "privateBytes": 47808512,
+              "workingSetBytes": 206970880,
+              "cpuSeconds": 1.984375
+            },
+            {
+              "pid": 19016,
+              "privateBytes": 113639424,
+              "workingSetBytes": 436932608,
+              "cpuSeconds": 20.4375
+            },
+            {
+              "pid": 4388,
+              "privateBytes": 188448768,
+              "workingSetBytes": 531841024,
+              "cpuSeconds": 298.09375
+            },
+            {
+              "pid": 13452,
+              "privateBytes": 100163584,
+              "workingSetBytes": 379678720,
+              "cpuSeconds": 4.109375
+            },
+            {
+              "pid": 9640,
+              "privateBytes": 98168832,
+              "workingSetBytes": 377507840,
+              "cpuSeconds": 4.015625
+            },
+            {
+              "pid": 10196,
+              "privateBytes": 100601856,
+              "workingSetBytes": 380297216,
+              "cpuSeconds": 4.109375
+            },
+            {
+              "pid": 14140,
+              "privateBytes": 97730560,
+              "workingSetBytes": 377491456,
+              "cpuSeconds": 3.84375
+            },
+            {
+              "pid": 1276,
+              "privateBytes": 97771520,
+              "workingSetBytes": 377544704,
+              "cpuSeconds": 3.859375
+            },
+            {
+              "pid": 16344,
+              "privateBytes": 97308672,
+              "workingSetBytes": 376827904,
+              "cpuSeconds": 3.78125
+            },
+            {
+              "pid": 22684,
+              "privateBytes": 97759232,
+              "workingSetBytes": 377520128,
+              "cpuSeconds": 3.84375
+            },
+            {
+              "pid": 10780,
+              "privateBytes": 97419264,
+              "workingSetBytes": 376901632,
+              "cpuSeconds": 3.9375
+            },
+            {
+              "pid": 14636,
+              "privateBytes": 100155392,
+              "workingSetBytes": 380329984,
+              "cpuSeconds": 3.65625
+            },
+            {
+              "pid": 22372,
+              "privateBytes": 97796096,
+              "workingSetBytes": 377819136,
+              "cpuSeconds": 3.375
+            },
+            {
+              "pid": 11100,
+              "privateBytes": 98684928,
+              "workingSetBytes": 379920384,
+              "cpuSeconds": 4.453125
+            },
+            {
+              "pid": 10124,
+              "privateBytes": 97935360,
+              "workingSetBytes": 388657152,
+              "cpuSeconds": 3.671875
+            },
+            {
+              "pid": 14788,
+              "privateBytes": 98734080,
+              "workingSetBytes": 386678784,
+              "cpuSeconds": 7.734375
+            },
+            {
+              "pid": 20216,
+              "privateBytes": 100454400,
+              "workingSetBytes": 380874752,
+              "cpuSeconds": 3.671875
+            },
+            {
+              "pid": 15288,
+              "privateBytes": 49168384,
+              "workingSetBytes": 214147072,
+              "cpuSeconds": 45.828125
+            },
+            {
+              "pid": 4216,
+              "privateBytes": 60129280,
+              "workingSetBytes": 266084352,
+              "cpuSeconds": 2.890625
+            },
+            {
+              "pid": 1824,
+              "privateBytes": 63229952,
+              "workingSetBytes": 269107200,
+              "cpuSeconds": 2.3125
+            }
+          ],
+          "missingProcessCount": 0
+        }
+      ],
+      "restoration": null
+    },
+    "enabled": {
+      "preferences": [
+        {
+          "key": "performance_tuning.high_efficiency_mode.state",
+          "value": 2
+        },
+        {
+          "key": "performance_tuning.high_efficiency_mode.aggressiveness",
+          "value": 2
+        }
+      ],
+      "nativeCacheDefaults": {
+        "emptyRendererReuseDisabled": true,
+        "transientKeepAliveDisabled": true
+      },
+      "samples": [
+        {
+          "label": "loaded",
+          "browserPid": 14196,
+          "capturedUtc": "2026-11-16T02:27:39.1207792Z",
+          "privateBytes": 2553270272,
+          "workingSetBytes": 9447694336,
+          "cpuSeconds": 182.046875,
+          "systemAvailableBytes": 6440378368,
+          "systemTotalBytes": 17128624128,
+          "processes": [
+            {
+              "pid": 14196,
+              "privateBytes": 187215872,
+              "workingSetBytes": 656605184,
+              "cpuSeconds": 62.71875
+            },
+            {
+              "pid": 5232,
+              "privateBytes": 7315456,
+              "workingSetBytes": 20156416,
+              "cpuSeconds": 0.078125
+            },
+            {
+              "pid": 1516,
+              "privateBytes": 7057408,
+              "workingSetBytes": 17948672,
+              "cpuSeconds": 0.09375
+            },
+            {
+              "pid": 10352,
+              "privateBytes": 250208256,
+              "workingSetBytes": 338407424,
+              "cpuSeconds": 21.765625
+            },
+            {
+              "pid": 13088,
+              "privateBytes": 60559360,
+              "workingSetBytes": 261402624,
+              "cpuSeconds": 4.484375
+            },
+            {
+              "pid": 11408,
+              "privateBytes": 48033792,
+              "workingSetBytes": 207155200,
+              "cpuSeconds": 0.859375
+            },
+            {
+              "pid": 14612,
+              "privateBytes": 109604864,
+              "workingSetBytes": 433709056,
+              "cpuSeconds": 15.9375
+            },
+            {
+              "pid": 18824,
+              "privateBytes": 63406080,
+              "workingSetBytes": 284909568,
+              "cpuSeconds": 1.421875
+            },
+            {
+              "pid": 6260,
+              "privateBytes": 108904448,
+              "workingSetBytes": 445632512,
+              "cpuSeconds": 25.828125
+            },
+            {
+              "pid": 18816,
+              "privateBytes": 100208640,
+              "workingSetBytes": 380575744,
+              "cpuSeconds": 1.921875
+            },
+            {
+              "pid": 18428,
+              "privateBytes": 97447936,
+              "workingSetBytes": 376680448,
+              "cpuSeconds": 1.265625
+            },
+            {
+              "pid": 23300,
+              "privateBytes": 97333248,
+              "workingSetBytes": 376795136,
+              "cpuSeconds": 1.484375
+            },
+            {
+              "pid": 12040,
+              "privateBytes": 99381248,
+              "workingSetBytes": 380100608,
+              "cpuSeconds": 1.71875
+            },
+            {
+              "pid": 6928,
+              "privateBytes": 97591296,
+              "workingSetBytes": 377028608,
+              "cpuSeconds": 1.34375
+            },
+            {
+              "pid": 9316,
+              "privateBytes": 102584320,
+              "workingSetBytes": 383148032,
+              "cpuSeconds": 1.859375
+            },
+            {
+              "pid": 22260,
+              "privateBytes": 97075200,
+              "workingSetBytes": 376422400,
+              "cpuSeconds": 1.234375
+            },
+            {
+              "pid": 23232,
+              "privateBytes": 97562624,
+              "workingSetBytes": 376864768,
+              "cpuSeconds": 1.40625
+            },
+            {
+              "pid": 22212,
+              "privateBytes": 97931264,
+              "workingSetBytes": 377352192,
+              "cpuSeconds": 1.4375
+            },
+            {
+              "pid": 23252,
+              "privateBytes": 103034880,
+              "workingSetBytes": 383639552,
+              "cpuSeconds": 1.546875
+            },
+            {
+              "pid": 3812,
+              "privateBytes": 100196352,
+              "workingSetBytes": 379637760,
+              "cpuSeconds": 1.625
+            },
+            {
+              "pid": 16804,
+              "privateBytes": 100683776,
+              "workingSetBytes": 409608192,
+              "cpuSeconds": 2.328125
+            },
+            {
+              "pid": 15688,
+              "privateBytes": 100208640,
+              "workingSetBytes": 387010560,
+              "cpuSeconds": 1.671875
+            },
+            {
+              "pid": 12032,
+              "privateBytes": 63254528,
+              "workingSetBytes": 339456000,
+              "cpuSeconds": 1.3125
+            },
+            {
+              "pid": 3476,
+              "privateBytes": 48873472,
+              "workingSetBytes": 213614592,
+              "cpuSeconds": 2.125
+            },
+            {
+              "pid": 7696,
+              "privateBytes": 97923072,
+              "workingSetBytes": 392204288,
+              "cpuSeconds": 1.4375
+            },
+            {
+              "pid": 22368,
+              "privateBytes": 62976000,
+              "workingSetBytes": 339173376,
+              "cpuSeconds": 1.265625
+            },
+            {
+              "pid": 10744,
+              "privateBytes": 58073088,
+              "workingSetBytes": 261865472,
+              "cpuSeconds": 0.828125
+            },
+            {
+              "pid": 14976,
+              "privateBytes": 58138624,
+              "workingSetBytes": 261881856,
+              "cpuSeconds": 0.984375
+            },
+            {
+              "pid": 15296,
+              "privateBytes": 8097792,
+              "workingSetBytes": 28672,
+              "cpuSeconds": 0.296875
+            },
+            {
+              "pid": 15220,
+              "privateBytes": 22388736,
+              "workingSetBytes": 8679424,
+              "cpuSeconds": 19.765625
+            }
+          ],
+          "missingProcessCount": 0
+        },
+        {
+          "label": "idle",
+          "browserPid": 14196,
+          "capturedUtc": "2026-11-16T02:33:41.5049456Z",
+          "privateBytes": 1448927232,
+          "workingSetBytes": 5078085632,
+          "cpuSeconds": 433.71875,
+          "systemAvailableBytes": 9516523520,
+          "systemTotalBytes": 17128624128,
+          "processes": [
+            {
+              "pid": 14196,
+              "privateBytes": 207380480,
+              "workingSetBytes": 679325696,
+              "cpuSeconds": 169.21875
+            },
+            {
+              "pid": 5232,
+              "privateBytes": 7180288,
+              "workingSetBytes": 20123648,
+              "cpuSeconds": 0.078125
+            },
+            {
+              "pid": 1516,
+              "privateBytes": 6889472,
+              "workingSetBytes": 17915904,
+              "cpuSeconds": 0.09375
+            },
+            {
+              "pid": 10352,
+              "privateBytes": 235216896,
+              "workingSetBytes": 340697088,
+              "cpuSeconds": 41.71875
+            },
+            {
+              "pid": 13088,
+              "privateBytes": 60182528,
+              "workingSetBytes": 257761280,
+              "cpuSeconds": 16.765625
+            },
+            {
+              "pid": 11408,
+              "privateBytes": 48070656,
+              "workingSetBytes": 207282176,
+              "cpuSeconds": 2.171875
+            },
+            {
+              "pid": 14612,
+              "privateBytes": 112427008,
+              "workingSetBytes": 436719616,
+              "cpuSeconds": 19.46875
+            },
+            {
+              "pid": 6260,
+              "privateBytes": 112140288,
+              "workingSetBytes": 448716800,
+              "cpuSeconds": 83.75
+            },
+            {
+              "pid": 3812,
+              "privateBytes": 100098048,
+              "workingSetBytes": 380030976,
+              "cpuSeconds": 3.9375
+            },
+            {
+              "pid": 16804,
+              "privateBytes": 98344960,
+              "workingSetBytes": 408313856,
+              "cpuSeconds": 5.34375
+            },
+            {
+              "pid": 15688,
+              "privateBytes": 98480128,
+              "workingSetBytes": 386035712,
+              "cpuSeconds": 8.265625
+            },
+            {
+              "pid": 3476,
+              "privateBytes": 48988160,
+              "workingSetBytes": 213999616,
+              "cpuSeconds": 48.25
+            },
+            {
+              "pid": 7696,
+              "privateBytes": 98332672,
+              "workingSetBytes": 393084928,
+              "cpuSeconds": 4.625
+            },
+            {
+              "pid": 22368,
+              "privateBytes": 64544768,
+              "workingSetBytes": 344944640,
+              "cpuSeconds": 3.953125
+            },
+            {
+              "pid": 10744,
+              "privateBytes": 60076032,
+              "workingSetBytes": 265396224,
+              "cpuSeconds": 2.546875
+            },
+            {
+              "pid": 14976,
+              "privateBytes": 60092416,
+              "workingSetBytes": 265428992,
+              "cpuSeconds": 2.984375
+            },
+            {
+              "pid": 15296,
+              "privateBytes": 8097792,
+              "workingSetBytes": 258048,
+              "cpuSeconds": 0.296875
+            },
+            {
+              "pid": 15220,
+              "privateBytes": 22384640,
+              "workingSetBytes": 12050432,
+              "cpuSeconds": 20.25
+            }
+          ],
+          "missingProcessCount": 0
+        }
+      ],
+      "restoration": {
+        "milliseconds": 939,
+        "sessionStoragePreserved": true,
+        "manualProbe": false
+      }
+    }
+  },
+  "finalDifferencePrivateBytes": 1001881600,
+  "finalDifferencePercent": 40.8796307128699
+}

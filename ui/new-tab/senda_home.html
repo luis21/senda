@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="es" dir="ltr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Nueva pestaña</title>
+  <link rel="stylesheet" href="senda_home.css">
+  <script type="module" src="senda_home.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#search" aria-label="Senda, ir al buscador">
+      <svg viewBox="0 0 40 40" aria-hidden="true"><path d="M29 8H18a8 8 0 0 0 0 16h4a4 4 0 0 1 0 8H11"/><circle cx="29" cy="8" r="3"/><circle cx="11" cy="32" r="3"/></svg>
+      <span>Senda</span>
+    </a>
+    <button id="customize" class="text-button" type="button" aria-haspopup="dialog">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16M9 4v6m6 4v6"/></svg>
+      Personalizar
+    </button>
+  </header>
+  <main>
+    <section class="journey" aria-labelledby="heading">
+      <p class="intro">Un nuevo comienzo.</p>
+      <h1 id="heading">¿A dónde vamos?</h1>
+      <form id="search-form" role="search">
+        <label for="search" class="sr-only">Buscar en la web</label>
+        <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>
+        <input id="search" type="search" placeholder="Busca algo que te inspire" autocomplete="off" spellcheck="false" required>
+        <button class="search-submit" type="submit" aria-label="Buscar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button>
+      </form>
+      <p class="engine-note">Buscar con <span id="engine-name">DuckDuckGo</span></p>
+    </section>
+    <section class="sites" aria-labelledby="sites-heading">
+      <div class="section-heading"><h2 id="sites-heading">Tus sitios</h2><button id="add-link" class="text-button" type="button" aria-haspopup="dialog">+ Añadir acceso</button></div>
+      <div id="links" class="links"></div>
+      <div id="empty" class="empty"><span class="empty-symbol" aria-hidden="true">↗</span><p>Lo que visitas, más cerca.</p><span>Añade tus sitios favoritos para tenerlos a mano.</span></div>
+    </section>
+    <p id="status" role="status" aria-live="polite"></p>
+  </main>
+  <dialog id="settings-dialog" aria-labelledby="settings-heading">
+    <form id="settings-form">
+      <div class="dialog-heading"><h2 id="settings-heading">A tu manera</h2><button class="close text-button" type="button" data-close="settings-dialog" aria-label="Cerrar personalización">×</button></div>
+      <p class="dialog-copy">Un espacio cómodo para empezar.</p>
+      <label for="theme">Apariencia</label><select id="theme"><option value="system">Seguir el sistema</option><option value="light">Claro</option><option value="dark">Oscuro</option></select>
+      <label for="engine">Buscador de esta página</label><select id="engine"><option value="duckduckgo">DuckDuckGo</option><option value="google">Google</option><option value="bing">Bing</option></select>
+      <p class="field-note">Tus preferencias se guardan en este perfil.</p>
+      <div class="dialog-actions"><button type="button" class="secondary" data-close="settings-dialog">Cancelar</button><button type="submit" class="primary">Guardar</button></div>
+    </form>
+  </dialog>
+  <dialog id="link-dialog" aria-labelledby="link-heading">
+    <form id="link-form">
+      <div class="dialog-heading"><h2 id="link-heading">Añadir acceso</h2><button class="close text-button" type="button" data-close="link-dialog" aria-label="Cerrar editor de acceso">×</button></div>
+      <label for="link-title">Nombre</label><input id="link-title" maxlength="40" autocomplete="off" placeholder="El nombre de tu sitio" required>
+      <label for="link-url">Dirección</label><input id="link-url" type="text" inputmode="url" autocomplete="off" placeholder="https://ejemplo.com" required aria-describedby="link-error">
+      <p id="link-error" role="alert"></p>
+      <div class="dialog-actions"><button id="remove-link" type="button" class="danger" hidden>Eliminar</button><span class="spacer"></span><button type="button" class="secondary" data-close="link-dialog">Cancelar</button><button type="submit" class="primary">Guardar</button></div>
+    </form>
+  </dialog>
+</body>
+</html>

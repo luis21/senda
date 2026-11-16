@@ -1,0 +1,19 @@
+* text=auto
+*.md text eol=lf
+*.json text eol=lf
+*.gn text eol=lf
+*.py text eol=lf
+*.mjs text eol=lf
+*.ts text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.ps1 text eol=crlf
+*.psm1 text eol=crlf
+*.patch -text
+*.png binary
+assets/filters/UnindexedRules binary
+.gitattributes text eol=lf
+.gitignore text eol=lf
+patches/series text eol=lf
+third_party/easylist/*.txt -text
+assets/filters/LICENSE -text

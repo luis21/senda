@@ -1,0 +1,80 @@
+diff --git a/chrome/app/chromium_strings.grd b/chrome/app/chromium_strings.grd
+index 3de8ca69c9..b882895049 100644
+--- a/chrome/app/chromium_strings.grd
++++ b/chrome/app/chromium_strings.grd
+@@ -294,10 +294,10 @@ If you update this file, be sure also to update google_chrome_strings.grd. -->
+         </then>
+         <else>
+           <message name="IDS_PRODUCT_NAME" desc="The Chrome application name" translateable="false">
+-            Chromium
++            Senda
+           </message>
+           <message name="IDS_SHORT_PRODUCT_NAME" desc="The Chrome application short name." translateable="false">
+-            Chromium
++            Senda
+           </message>
+         </else>
+       </if>
+@@ -452,7 +452,7 @@ New bookmarks can’t be saved in your account until you delete some. If you sig
+           </then>
+           <else>
+             <message name="IDS_BROWSER_WINDOW_TITLE_FORMAT" desc="The format for titles displayed in tabs and popup windows">
+-              <ph name="PAGE_TITLE">$1<ex>Google</ex></ph> - Chromium
++              <ph name="PAGE_TITLE">$1<ex>Google</ex></ph> - Senda
+             </message>
+           </else>
+         </if>
+@@ -460,19 +460,19 @@ New bookmarks can’t be saved in your account until you delete some. If you sig
+       <if expr="is_chromeos">
+         <!-- Browser Window Title Format -->
+         <message name="IDS_BROWSER_WINDOW_TITLE_FORMAT" desc="The format for titles displayed in tabbed browser windows">
+-          Chromium - <ph name="PAGE_TITLE">$1<ex>Google</ex></ph>
++          Senda - <ph name="PAGE_TITLE">$1<ex>Google</ex></ph>
+         </message>
+       </if>
+       <if expr="not is_chromeos and not is_macosx">
+         <!-- Captive Portal Browser Window Title Format -->
+         <message name="IDS_CAPTIVE_PORTAL_BROWSER_WINDOW_TITLE_FORMAT" desc="The format for titles displayed in captive portal popup windows">
+-          <ph name="PAGE_TITLE">$1<ex>Google</ex></ph> - Network Sign-in - Chromium
++          <ph name="PAGE_TITLE">$1<ex>Google</ex></ph> - Network Sign-in - Senda
+         </message>
+       </if>
+       <if expr="is_chromeos">
+         <!-- Captive Portal Browser Window Title Format -->
+         <message name="IDS_CAPTIVE_PORTAL_BROWSER_WINDOW_TITLE_FORMAT" desc="The format for titles displayed in captive portal popup windows">
+-          Chromium - Network Sign-in - <ph name="PAGE_TITLE">$1<ex>Google</ex></ph>
++          Senda - Network Sign-in - <ph name="PAGE_TITLE">$1<ex>Google</ex></ph>
+         </message>
+       </if>
+       <if expr="is_macosx">
+diff --git a/chrome/app/theme/chromium/BRANDING b/chrome/app/theme/chromium/BRANDING
+index f8363d5b29..51ae202a28 100644
+--- a/chrome/app/theme/chromium/BRANDING
++++ b/chrome/app/theme/chromium/BRANDING
+@@ -1,9 +1,9 @@
+ COMPANY_FULLNAME=The Chromium Authors
+ COMPANY_SHORTNAME=The Chromium Authors
+-PRODUCT_FULLNAME=Chromium
+-PRODUCT_SHORTNAME=Chromium
+-PRODUCT_INSTALLER_FULLNAME=Chromium Installer
+-PRODUCT_INSTALLER_SHORTNAME=Chromium Installer
++PRODUCT_FULLNAME=Senda
++PRODUCT_SHORTNAME=Senda
++PRODUCT_INSTALLER_FULLNAME=Senda Installer
++PRODUCT_INSTALLER_SHORTNAME=Senda Installer
+ COPYRIGHT=Copyright @LASTCHANGE_YEAR@ The Chromium Authors. All rights reserved.
+ MAC_BUNDLE_ID=org.chromium.Chromium
+ MAC_CREATOR_CODE=Cr24
+diff --git a/chrome/install_static/chromium_install_modes.h b/chrome/install_static/chromium_install_modes.h
+index a6d969df56..cfadd405d1 100644
+--- a/chrome/install_static/chromium_install_modes.h
++++ b/chrome/install_static/chromium_install_modes.h
+@@ -21,7 +21,7 @@ inline constexpr wchar_t kCompanyPathName[] = L"";
+ 
+ // The brand-specific product name to be included as a component of the install
+ // and user data directory paths.
+-inline constexpr wchar_t kProductPathName[] = L"Chromium";
++inline constexpr wchar_t kProductPathName[] = L"Senda";
+ 
+ // The brand-specific safe browsing client name.
+ inline constexpr char kSafeBrowsingName[] = "chromium";
