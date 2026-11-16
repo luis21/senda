@@ -9,6 +9,7 @@ const root=process.cwd();
 const profile=path.resolve(process.argv[2] || '.profiles/protection-test');
 assert.ok(profile.startsWith(path.join(root,'.profiles')+path.sep), 'Use a dedicated workspace test profile');
 const allow=process.argv.includes('--allow-site');
+const cosmetic=process.argv.includes('--cosmetic');
 const customPrivacy=process.argv.includes('--custom-privacy');
 const received=[];
 const recover=process.argv.includes('--corrupt-index');
@@ -30,11 +31,17 @@ if(recover) {
 let port;
 const server=http.createServer((req,res)=>{
   received.push({host:req.headers.host,path:req.url});
-  if(req.url==='/page') {
+  if(req.url.startsWith('/page')) {
     res.writeHead(200,{'Content-Type':'text/html'});
-    res.end(`<!doctype html><title>Senda protection test</title><script src="/good.js"></script><script src="http://tracker.senda.test:${port}/__utm.gif"></script><script src="http://ad.doubleclick.net:${port}/ad.js"></script><p>Controlled page</p>`);
-  } else {
+    res.end(`<!doctype html><title>Senda protection test</title><script src="/good.js"></script><script src="http://tracker.senda.test:${port}/__utm.gif"></script><script src="http://ad.doubleclick.net:${port}/ad.js"></script><p id="legitimate">Controlled page</p><div id="adbanner1" style="display:block!important">Ad placeholder</div><div class="ad-banner-box">Class placeholder</div><div id="dynamic">Dynamic placeholder</div><div id="ad-carousel">Domain exception</div><div id="domain-only" data-adbridg-ad-class>Domain selector</div>`);
+  } else if(req.url==='/empty') {
+    res.writeHead(200,{'Content-Type':'text/html'});
+    res.end('<!doctype html><title>Senda protection test</title><p>Ad-free controlled page</p>');
+  } else if(req.url==='/worker.js') {
     res.writeHead(200,{'Content-Type':'text/javascript'});
+    res.end(`fetch('http://tracker.senda.test:${port}/__utm.gif?worker').then(()=>postMessage('allowed'),()=>postMessage('blocked'));`);
+  } else {
+    res.writeHead(200,{'Content-Type':'text/javascript','Access-Control-Allow-Origin':'*'});
     res.end(req.url==='/good.js'?'window.sendaGood=true':req.url==='/__utm.gif'?'window.sendaTracker=true':'window.sendaAd=true');
   }
 });
@@ -56,10 +63,10 @@ if(allow || customPrivacy) {
   }
   await writeFile(path.join(profile,'Default/Preferences'),JSON.stringify(preferences));
 }
-const browser=spawn(path.join(root,'.chromium/src/out/SendaDev/chrome.exe'),[
+const browser=spawn(path.join(root,'.chromium/src/out/SendaDev',process.argv.includes('--senda-exe')?'senda.exe':'chrome.exe'),[
   ...(process.argv.includes('--headed')?[]:['--headless']),`--user-data-dir=${profile}`,'--remote-debugging-port=0','--no-first-run','--no-default-browser-check','--no-proxy-server',
-  '--host-resolver-rules=MAP *.senda.test 127.0.0.1, MAP ad.doubleclick.net 127.0.0.1', `http://site.senda.test:${port}/page`,
-],{windowsHide:true,stdio:'ignore'});
+  '--host-resolver-rules=MAP *.senda.test 127.0.0.1, MAP ad.doubleclick.net 127.0.0.1, MAP dez.ro 127.0.0.1, MAP sub.dez.ro 127.0.0.1, MAP anagram-solver.io 127.0.0.1', `http://site.senda.test:${port}/page`,
+],{windowsHide:!process.argv.includes('--headed'),stdio:'ignore'});
 let cdp;
 try {
   let active;
@@ -109,6 +116,66 @@ try {
   assert.equal(received.some(r=>r.host.startsWith('tracker.senda.test:')),allow,'Tracker reached test server unexpectedly');
   assert.equal(received.some(r=>r.host.startsWith('ad.doubleclick.net:')),allow,'Ad reached test server unexpectedly');
   console.log('PASS: '+(allow?'site exception restores legitimate, ad and tracker requests':'native default blocks ads/trackers and permits legitimate requests'));
+  if(cosmetic) {
+    await cdp.send('Runtime.evaluate',{expression:`document.querySelector('#dynamic').className='ad-banner-2';
+      window.sendaClone=document.querySelector('#adbanner1').cloneNode(true); document.body.append(sendaClone);`,returnByValue:true},session);
+    await new Promise(resolve=>setTimeout(resolve,200));
+    const result=await cdp.send('Runtime.evaluate',{expression:`Object.fromEntries(['#legitimate','#adbanner1','.ad-banner-box','#dynamic'].map(s=>[s,getComputedStyle(document.querySelector(s)).display])).valueOf()`,returnByValue:true},session);
+    const displays=result.result.value;
+    console.log(JSON.stringify({cosmetic:displays}));
+    assert.equal(displays['#legitimate'],'block','Legitimate content must remain visible');
+    for(const selector of ['#adbanner1','.ad-banner-box','#dynamic'])assert.equal(displays[selector],allow?'block':'none',selector+' cosmetic filtering or exception failed');
+    const clone=await cdp.send('Runtime.evaluate',{expression:'getComputedStyle(sendaClone).display',returnByValue:true},session);
+    assert.equal(clone.result.value,allow?'block':'none','Cloned nodes must obey native cosmetic styles');
+    const template=await cdp.send('Runtime.evaluate',{expression:`(() => {
+      const template=document.createElement('template');
+      template.innerHTML='<div id="AC_ad">Template advertisement</div>';
+      document.body.append(template.content.cloneNode(true));
+    })()`,returnByValue:true},session);
+    assert.equal(template.exceptionDetails,undefined);
+    await new Promise(resolve=>setTimeout(resolve,200));
+    const adopted=await cdp.send('Runtime.evaluate',{expression:'getComputedStyle(document.getElementById("AC_ad")).display',returnByValue:true},session);
+    assert.equal(adopted.result.value,allow?'block':'none','Elements adopted from an inert template must be filtered');
+    console.log('PASS: native cosmetic filtering covers IDs, classes, mutations, clones, adopted templates and user !important styles.');
+    for(const host of ['dez.ro','sub.dez.ro','anagram-solver.io']) {
+      const created=await cdp.send('Target.createTarget',{url:`http://${host}:${port}/page`});
+      const child=(await cdp.send('Target.attachToTarget',{targetId:created.targetId,flatten:true})).sessionId;
+      let styles;
+      const limit=Date.now()+15000;
+      while(Date.now()<limit) {
+        const r=await cdp.send('Runtime.evaluate',{expression:`document.readyState==='complete' && document.querySelector('#ad-carousel') ? ['ad-carousel','domain-only'].map(id=>getComputedStyle(document.getElementById(id)).display):null`,returnByValue:true},child);
+        styles=r.result.value;
+        if(styles)break;
+        await new Promise(resolve=>setTimeout(resolve,100));
+      }
+      if(!styles)console.log(await cdp.send('Runtime.evaluate',{expression:'({url:location.href,title:document.title})',returnByValue:true},child));
+      assert.ok(styles,'Domain fixture did not load');
+      console.log(JSON.stringify({host,styles}));
+      assert.equal(styles[0],host.endsWith('dez.ro')?'block':'none','Cosmetic exception must apply to the domain and its children');
+      assert.equal(styles[1],host==='anagram-solver.io'?'none':'block','Domain-only selector must not leak to other sites');
+      await cdp.send('Target.closeTarget',{targetId:created.targetId});
+    }
+    console.log('PASS: domain-only selectors and inherited cosmetic exceptions are respected.');
+  }
+  }
+  if(process.argv.includes('--cosmetic-activation')) {
+    for(const hostAndPath of ['localhost', 'music.amazon.senda.test', 'sub.music.amazon.senda.test', 'www.google.senda.test', 'site.senda.test/path']) {
+      const [host,extra]=hostAndPath.split('/');
+      const created=await cdp.send('Target.createTarget',{url:`http://${host}:${port}/page${extra?'?case=://localhost/':''}`});
+      const child=(await cdp.send('Target.attachToTarget',{targetId:created.targetId,flatten:true})).sessionId;
+      let styles;
+      const limit=Date.now()+15000;
+      while(Date.now()<limit) {
+        const r=await cdp.send('Runtime.evaluate',{expression:`document.readyState==='complete' && document.querySelector('#adbanner1') ? ['adbanner1','legitimate'].map(id=>getComputedStyle(document.getElementById(id)).display):null`,returnByValue:true},child);
+        styles=r.result.value;
+        if(styles)break;
+        await new Promise(resolve=>setTimeout(resolve,100));
+      }
+      console.log(JSON.stringify({activationException:hostAndPath,styles}));
+      assert.deepEqual(styles,['block','block'],'Cosmetic activation exceptions must preserve content');
+      await cdp.send('Target.closeTarget',{targetId:created.targetId});
+    }
+    console.log('PASS: generic-hide exceptions cover localhost, host families, subdomains and URL fragments.');
   }
   if(process.argv.includes('--check-privacy')) {
     const settings=await cdp.send('Target.createTarget',{url:'chrome://settings/'});
@@ -134,6 +201,11 @@ try {
     assert.equal(values['search.suggest_enabled'],customPrivacy);
     assert.equal(values['safebrowsing.enabled'],true);
     console.log('PASS: '+(customPrivacy?'explicit privacy preferences respected':'privacy defaults configured')+', Safe Browsing retained.');
+  }
+  if(process.argv.includes('--inspect-panel')) {
+    console.log('READY: dedicated test browser available for native panel inspection.');
+    await new Promise(resolve=>browser.once('exit',resolve));
+    cdp.close(); cdp=null;
   }
 } finally {
   if(cdp){try{await cdp.send('Browser.close');}catch{}cdp.close();}

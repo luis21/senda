@@ -10,6 +10,115 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 
+def prepare_cosmetic_exceptions(source_texts):
+    """Preserve activation exceptions omitted by the legacy URL converter.
+
+    URL paths and options may narrow a rule; applying its exception to the
+    entire host is conservative. Unknown patterns disable the corresponding
+    cosmetic category rather than risk hiding legitimate content.
+    """
+    result = {key: set() for key in ('generic_domains', 'all_domains', 'generic_prefixes',
+              'all_prefixes', 'generic_url_substrings', 'all_url_substrings')}
+    result.update(disable_all_generic=False, disable_all_cosmetic=False, source_rules=0, fallback_rules=0)
+    for text in source_texts:
+        for line in text.splitlines():
+            if not line.startswith('@@') or '$' not in line:
+                continue
+            pattern, options = line[2:].rsplit('$', 1)
+            options = options.lower().split(',')
+            names = {option.lstrip('~') for option in options}
+            if names & {'elemhide', 'ehide', 'specifichide', 'shide'}:
+                category = 'all'
+            elif names & {'generichide', 'ghide'}:
+                category = 'generic'
+            else:
+                continue
+            result['source_rules'] += 1
+            covered = False
+            if pattern.startswith('||'):
+                host = re.split(r'[\^/:?]', pattern[2:], 1)[0].lower()
+                rest = pattern[2+len(host):]
+                if re.fullmatch(r'[a-z0-9_.-]+', host) and rest:
+                    result[category+'_domains'].add(host)
+                    covered = True
+                elif re.fullmatch(r'[a-z0-9_.-]+\*?', host):
+                    result[category+'_prefixes'].add(host.rstrip('*'))
+                    covered = True
+            elif re.fullmatch(r'://[a-zA-Z0-9_.:/-]+', pattern):
+                # These rules are substring patterns, including inside a URL
+                # path. Keeping the literal also covers private IP prefixes.
+                result[category+'_url_substrings'].add(pattern)
+                covered = True
+            elif not pattern:
+                domain_options = [o[7:] for o in options if o.startswith('domain=')]
+                if len(domain_options) == 1:
+                    domains = [d for d in domain_options[0].split('|') if not d.startswith('~')]
+                    if domains and all(re.fullmatch(r'[a-z0-9_.-]+', d) for d in domains):
+                        result[category+'_domains'].update(domains)
+                        covered = True
+            if not covered:
+                result['disable_all_cosmetic' if category == 'all' else 'disable_all_generic'] = True
+                result['fallback_rules'] += 1
+    return {key: sorted(value) if isinstance(value, set) else value for key, value in result.items()}
+
+def render_cosmetic_exceptions(exceptions):
+    text = ('// Derived from EasyList/EasyPrivacy by the Senda filter compiler.\n'
+            '// The EasyList authors, CC-BY-SA-3.0; see the accompanying LICENSE.\n'
+            '// Paths/options are widened conservatively; unknown rules disable hiding.\n')
+    names = {'generic_domains': 'GenericCosmeticDomains', 'all_domains': 'AllCosmeticDomains',
+             'generic_prefixes': 'GenericCosmeticHostPrefixes', 'all_prefixes': 'AllCosmeticHostPrefixes',
+             'generic_url_substrings': 'GenericCosmeticUrlSubstrings', 'all_url_substrings': 'AllCosmeticUrlSubstrings'}
+    for key, name in names.items():
+        text += f'constexpr std::array<std::string_view, {len(exceptions[key])}> kSenda{name} = {{\n'
+        text += ''.join('    '+json.dumps(value)+',\n' for value in exceptions[key]) + '};\n'
+    for key, name in [('disable_all_generic', 'DisableAllGenericCosmetic'), ('disable_all_cosmetic', 'DisableAllCosmetic')]:
+        text += 'constexpr bool kSenda'+name+' = '+str(exceptions[key]).lower()+';\n'
+    return text.encode('utf-8')
+
+def prepare_cosmetic_rules(text):
+    """Normalize canonical CSS rules for Chromium's domain/class/ID index.
+
+    The converter has already rejected unsupported selector grammars. Negative
+    hiding domains become explicit exceptions. An unsupported exception drops
+    every hiding rule for that selector, preferring underblocking to breakage.
+    Site rules must precede generic rules to preserve exception indices.
+    """
+    parsed = []
+    unsafe = set()
+    omitted = 0
+    for line in text.splitlines():
+        marker = '#@#' if '#@#' in line else '##'
+        if marker not in line:
+            omitted += 1
+            continue
+        domain_text, selector = line.split(marker, 1)
+        domains = domain_text.split(',') if domain_text else []
+        valid_domains = all(re.fullmatch(r'~?[a-zA-Z0-9_.-]+', d) for d in domains)
+        valid_selector = (selector and selector.isascii() and
+                          not any(c in selector for c in ('{', '}', '/*', '*/', '@', ':style(', ':-abp-', ':has-text(', ':matches-css(')))
+        invalid_exception = marker == '#@#' and (not domains or any(d.startswith('~') for d in domains))
+        if not valid_domains or not valid_selector or invalid_exception:
+            if marker == '#@#':
+                unsafe.add(selector)
+            omitted += 1
+            continue
+        parsed.append((domains, marker, selector))
+    rules = set()
+    for domains, marker, selector in parsed:
+        if selector in unsafe:
+            omitted += 1
+            continue
+        if marker == '#@#':
+            rules.add(','.join(domains) + marker + selector)
+            continue
+        positive = [d for d in domains if not d.startswith('~')]
+        rules.add(','.join(positive) + '##' + selector)
+        for domain in domains:
+            if domain.startswith('~'):
+                rules.add(domain[1:] + '#@#' + selector)
+    ordered = sorted(rules, key=lambda rule: (rule.startswith('##'), rule))
+    return ordered, {'parsed': len(text.splitlines()), 'compiled': len(ordered), 'omitted': omitted}
+
 def validate_source(raw, title):
     if not 1024 <= len(raw) <= 20 * 1024 * 1024:
         raise ValueError('Filter source size outside accepted limits')
@@ -35,6 +144,8 @@ def main():
     sources = [(ROOT/'third_party/easylist/easylist.txt', 'EasyList', 'https://easylist.to/easylist/easylist.txt'),
                (ROOT/'third_party/easylist/easyprivacy.txt', 'EasyPrivacy', 'https://easylist.to/easylist/easyprivacy.txt')]
     provenance = [dict(validate_source(path.read_bytes(), title), url=url) for path, title, url in sources]
+    exceptions = prepare_cosmetic_exceptions([path.read_text(encoding='utf-8-sig') for path, _, _ in sources])
+    exception_header = render_cosmetic_exceptions(exceptions)
     bundle = ROOT/'assets/filters'
     bundle.mkdir(parents=True, exist_ok=True)
     logs = ROOT/'.tools'
@@ -51,29 +162,34 @@ def main():
         convert(['--input_format=filter-list', '--output_format=filter-list', '--chrome_version=59',
                  '--input_files='+','.join(str(path) for path, _, _ in sources), '--output_file_url='+str(network), '--output_file_css='+str(cosmetic)])
         network_count = len(network.read_text(encoding='utf-8').splitlines())
-        cosmetic_count = len(cosmetic.read_text(encoding='utf-8').splitlines())
+        cosmetic_rules, cosmetic_stats = prepare_cosmetic_rules(cosmetic.read_text(encoding='utf-8'))
+        supported_cosmetic = temporary/'supported-cosmetic.txt'
+        supported_cosmetic.write_text('\n'.join(cosmetic_rules)+'\n', encoding='utf-8')
         if network_count < 1000:
             raise ValueError('Too few supported network rules; previous snapshot preserved')
         convert(['--input_format=filter-list', '--output_format=unindexed-ruleset', '--chrome_version=59',
-                 '--input_files='+str(network), '--output_file_url='+str(binary)])
+                 '--input_files='+str(supported_cosmetic)+','+str(network), '--output_file='+str(binary)])
         data = binary.read_bytes()
         if not 1024 <= len(data) <= 20*1024*1024:
             raise ValueError('Unexpected converted size; previous snapshot preserved')
         manifest = {'schema': 1, 'format': 'chromium-unindexed-ruleset', 'sources': provenance,
-                    'network_rules': network_count, 'cosmetic_rules_parsed_but_not_activated': cosmetic_count,
+                    'network_rules': network_count, 'cosmetic_rules': cosmetic_stats,
+                    'cosmetic_exceptions': dict(
+                        {key: len(value) if isinstance(value, list) else value for key, value in exceptions.items()},
+                        bytes=len(exception_header), sha256=hashlib.sha256(exception_header).hexdigest()),
                     'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data),
                     'license': 'CC-BY-SA-3.0', 'authors': 'The EasyList authors (https://easylist.to/)',
-                    'changes': 'Converted supported URL rules with Chromium. Unsupported rules are omitted; cosmetic rules are not activated.'}
+                    'changes': 'Converted supported URL and CSS rules with Chromium. Negative CSS domains become explicit exceptions. Cosmetic activation exceptions are preserved conservatively; unsupported hiding syntax is omitted.'}
         license_text = 'EasyList and EasyPrivacy\nThe EasyList authors (https://easylist.to/)\n\nChanges: '+manifest['changes']+'\n\n'
         license_text += (ROOT/'third_party/easylist/LICENSE-CC-BY-SA-3.0.txt').read_text(encoding='utf-8')
-        for name, content in [('UnindexedRules', data), ('LICENSE', license_text.encode()),
+        for name, content in [('UnindexedRules', data), ('CosmeticExceptions.inc', exception_header), ('LICENSE', license_text.encode()),
                               ('manifest.json', (json.dumps(manifest, indent=2)+'\n').encode())]:
             staged = bundle/(name+'.tmp')
             staged.write_bytes(content)
             staged.replace(bundle/name)
         (logs/'supported-network-rules.txt').write_bytes(network.read_bytes())
-        (logs/'parsed-cosmetic-rules-not-active.txt').write_bytes(cosmetic.read_bytes())
-        print(json.dumps({'network_rules': network_count, 'cosmetic_not_active': cosmetic_count, 'bytes': len(data), 'sha256':manifest['sha256']}))
+        (logs/'supported-cosmetic-rules.txt').write_bytes(supported_cosmetic.read_bytes())
+        print(json.dumps({'network_rules': network_count, 'cosmetic_rules': cosmetic_stats, 'bytes': len(data), 'sha256':manifest['sha256']}))
 
 if __name__ == '__main__':
     main()

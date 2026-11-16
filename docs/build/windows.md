@@ -1,6 +1,6 @@
 # Compilar la base de Senda en Windows
 
-Un checkout sin parches genera Chromium base. Los parches incorporan identidad Senda, página de inicio y una primera capa de bloqueo nativo de red. Consultar los informes de validación antes de considerar probada una salida. Las optimizaciones de memoria siguen pendientes.
+Un checkout sin parches genera Chromium base. Los parches incorporan identidad Senda, página de inicio, bloqueo nativo de red y cosmético, panel por sitio y ahorro de memoria. Consultar los informes de validación para distinguir código compilado de comportamiento probado y límites pendientes.
 
 ## Preparación
 
@@ -64,6 +64,12 @@ Pruebas de estado de la página: `node --test tests/new-tab-state.test.mjs`. Las
 `Build-Senda.ps1` verifica SHA-256, formato, tamaño y licencia de `assets/filters/`, y copia sus archivos a `third_party/senda_filter_lists` del checkout antes de generar recursos. La instantánea está empaquetada en el navegador; no depende de una descarga al primer arranque. La generación manual desde las fuentes atribuidas se realiza con `python tools/prepare_filter_snapshot.py`, después de compilar el target `ruleset_converter`. Esta herramienta no descarga ni actualiza automáticamente las fuentes.
 
 Pruebas aisladas: `python -m unittest discover -s tests -p "test_*filters*.py"` y `python -m unittest discover -s tests -p "test_filter_snapshot.py"`. Prueba del navegador: `node tests/network-protection-browser.mjs .profiles/protection-fresh --check-privacy`. Usar un perfil nuevo para verificar valores iniciales. `--allow-site` prepara una excepción explícita en un perfil de prueba nuevo; `--corrupt-index` corrompe únicamente el índice de un perfil de prueba previamente generado y comprueba su recuperación. No usar perfiles con datos personales.
+
+## Cosmética y panel por sitio
+
+El parche 0005 conecta el índice cosmético a Blink; el 0006 añade el panel y el contador por página. `CosmeticExceptions.inc` conserva excepciones de activación que el conversor de URL antiguo omite. Su SHA-256 se verifica junto al binario de reglas y Git conserva sus finales de línea LF para evitar cambios de hash entre sistemas.
+
+La tabla se compila en el motor. Cambiar las listas requiere volver a preparar la instantánea y compilar; todavía no existe actualización automática en ejecución. `--cosmetic --cosmetic-activation` amplía la prueba del navegador con nodos dinámicos, plantillas, reglas por dominio y excepciones. `--headed --inspect-panel` deja abierta una instancia de prueba; `tests/protection-panel-probe.mjs` genera solicitudes tardías, de trabajadores y navegaciones. Resultados y límites: `docs/validation/2026-11-15-cosmetic-protection.md`.
 
 ## Memoria
 

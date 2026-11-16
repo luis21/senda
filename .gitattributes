@@ -12,6 +12,7 @@
 *.patch -text
 *.png binary
 assets/filters/UnindexedRules binary
+assets/filters/CosmeticExceptions.inc text eol=lf
 .gitattributes text eol=lf
 .gitignore text eol=lf
 patches/series text eol=lf

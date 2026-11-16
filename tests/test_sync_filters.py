@@ -26,6 +26,19 @@ class SnapshotVerification(unittest.TestCase):
             with self.assertRaises(ValueError):
                 tool.verify_snapshot(root)
 
+    def test_detects_corrupt_cosmetic_exceptions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.fixture(root)
+            header = b'// Controlled exception fixture\n'
+            (root/'CosmeticExceptions.inc').write_bytes(header)
+            manifest['cosmetic_exceptions'] = {'bytes':len(header), 'sha256':hashlib.sha256(header).hexdigest()}
+            (root/'manifest.json').write_text(json.dumps(manifest))
+            self.assertEqual(tool.verify_snapshot(root)['cosmetic_exceptions']['bytes'],len(header))
+            (root/'CosmeticExceptions.inc').write_bytes(b'// Tampered\n')
+            with self.assertRaises(ValueError):
+                tool.verify_snapshot(root)
+
     def test_preserves_destination_on_invalid_snapshot(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

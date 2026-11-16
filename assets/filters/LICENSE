@@ -1,7 +1,7 @@
 EasyList and EasyPrivacy
 The EasyList authors (https://easylist.to/)
 
-Changes: Converted supported URL rules with Chromium. Unsupported rules are omitted; cosmetic rules are not activated.
+Changes: Converted supported URL and CSS rules with Chromium. Negative CSS domains become explicit exceptions. Cosmetic activation exceptions are preserved conservatively; unsupported hiding syntax is omitted.
 
 Creative Commons Legal Code
 

@@ -1,0 +1,313 @@
+diff --git a/third_party/blink/renderer/core/dom/element.cc b/third_party/blink/renderer/core/dom/element.cc
+index a358a4ae0f..fc93bfccf1 100644
+--- a/third_party/blink/renderer/core/dom/element.cc
++++ b/third_party/blink/renderer/core/dom/element.cc
+@@ -251,6 +251,7 @@
+ #include "third_party/blink/renderer/core/layout/layout_view.h"
+ #include "third_party/blink/renderer/core/layout/svg/layout_svg_root.h"
+ #include "third_party/blink/renderer/core/loader/render_blocking_resource_manager.h"
++#include "third_party/blink/renderer/core/loader/senda_cosmetic_filter.h"
+ #include "third_party/blink/renderer/core/mathml/mathml_anchor_element.h"
+ #include "third_party/blink/renderer/core/overscroll/overscroll_area_tracker.h"
+ #include "third_party/blink/renderer/core/page/chrome_client.h"
+@@ -3817,6 +3818,9 @@ void Element::AttributeChanged(const AttributeModificationParams& params) {
+       }
+     }
+ 
++    if (auto* filter = SendaCosmeticFilter::FromIfExists(GetDocument())) {
++      filter->ObserveName(params.new_value, /*is_id=*/true);
++    }
+     ProcessElementRenderBlocking(new_id);
+ 
+     if (GetDocument().HasPendingExpectLinkElements() &&
+@@ -3987,6 +3991,9 @@ void Element::ClassAttributeChanged(const AtomicString& new_class_string) {
+   const SpaceSplitString& new_classes = GetElementData()->ClassNames();
+   for (const AtomicString& class_name : new_classes) {
+     attribute_or_class_bloom_ |= FilterForString(class_name);
++    if (auto* filter = SendaCosmeticFilter::FromIfExists(GetDocument())) {
++      filter->ObserveName(class_name, /*is_id=*/false);
++    }
+   }
+   UpdateSubtreeBloomFilterAfterInsert();
+   GetDocument().GetStyleEngine().ClassChangedForElement(old_classes,
+@@ -12285,6 +12292,17 @@ void Element::DidMoveToNewDocument(Document& old_document) {
+   // TODO(tkent): Even if Documents' modes are same, keeping
+   // ShareableElementData owned by old_document isn't right.
+ 
++  // Template fragments and adopted nodes keep their attributes when moved
++  // into an active document; no AttributeChanged callback is required.
++  if (auto* filter = SendaCosmeticFilter::FromIfExists(GetDocument())) {
++    filter->ObserveName(GetIdAttribute(), /*is_id=*/true);
++    if (HasClass()) {
++      for (const auto& name : ClassNames()) {
++        filter->ObserveName(name, /*is_id=*/false);
++      }
++    }
++  }
++
+   if (NeedsURLResolutionForInlineStyle(*this, old_document, GetDocument())) {
+     ReResolveURLsInInlineStyle(GetDocument(), EnsureMutableInlineStyle());
+   }
+diff --git a/third_party/blink/renderer/core/loader/build.gni b/third_party/blink/renderer/core/loader/build.gni
+index 11deec3533..47e78bd811 100644
+--- a/third_party/blink/renderer/core/loader/build.gni
++++ b/third_party/blink/renderer/core/loader/build.gni
+@@ -144,6 +144,8 @@ blink_core_sources_loader = [
+   "resource_load_observer_for_worker.cc",
+   "resource_load_observer_for_worker.h",
+   "shared_dictionary_hint_type.h",
++  "senda_cosmetic_filter.cc",
++  "senda_cosmetic_filter.h",
+   "subresource_filter.cc",
+   "subresource_filter.h",
+   "speculation_rule_loader.h",
+diff --git a/third_party/blink/renderer/core/loader/document_loader.cc b/third_party/blink/renderer/core/loader/document_loader.cc
+index b45783f2b9..069be08c48 100644
+--- a/third_party/blink/renderer/core/loader/document_loader.cc
++++ b/third_party/blink/renderer/core/loader/document_loader.cc
+@@ -136,6 +136,7 @@
+ #include "third_party/blink/renderer/core/loader/preload_helper.h"
+ #include "third_party/blink/renderer/core/loader/progress_tracker.h"
+ #include "third_party/blink/renderer/core/loader/subresource_filter.h"
++#include "third_party/blink/renderer/core/loader/senda_cosmetic_filter.h"
+ #include "third_party/blink/renderer/core/mobile_metrics/mobile_friendliness_checker.h"
+ #include "third_party/blink/renderer/core/navigation_api/navigation_api.h"
+ #include "third_party/blink/renderer/core/origin_trials/origin_trial_context.h"
+@@ -4146,6 +4147,10 @@ void DocumentLoader::SetSubresourceFilter(
+   DCHECK(subresource_filter);
+   subresource_filter_ = MakeGarbageCollected<SubresourceFilter>(
+       frame_->DomWindow(), base::WrapUnique(subresource_filter));
++  auto* cosmetic = MakeGarbageCollected<SendaCosmeticFilter>(
++      *frame_->GetDocument(), subresource_filter_.Get(), subresource_filter);
++  Supplement<Document>::ProvideTo(*frame_->GetDocument(), cosmetic);
++  cosmetic->Initialize();
+ }
+ 
+ WebDocumentLoader::ExtraData* DocumentLoader::GetExtraData() const {
+diff --git a/third_party/blink/renderer/core/loader/senda_cosmetic_filter.h b/third_party/blink/renderer/core/loader/senda_cosmetic_filter.h
+new file mode 100644
+--- /dev/null
++++ b/third_party/blink/renderer/core/loader/senda_cosmetic_filter.h
+@@ -0,0 +1,46 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_SENDA_COSMETIC_FILTER_H_
++#define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_SENDA_COSMETIC_FILTER_H_
++
++#include <string_view>
++#include <vector>
++
++#include "third_party/blink/renderer/core/core_export.h"
++#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
++#include "third_party/blink/renderer/platform/heap/member.h"
++#include "third_party/blink/renderer/platform/supplementable.h"
++#include "third_party/blink/renderer/platform/wtf/hash_set.h"
++#include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
++#include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
++
++namespace blink {
++class Document;
++class SubresourceFilter;
++class WebDocumentSubresourceFilter;
++
++class CORE_EXPORT SendaCosmeticFilter final
++    : public GarbageCollected<SendaCosmeticFilter>, public Supplement<Document> {
++ public:
++  static const char kSupplementName[];
++  SendaCosmeticFilter(Document&, SubresourceFilter*, WebDocumentSubresourceFilter*);
++  static SendaCosmeticFilter* FromIfExists(Document&);
++  void Initialize();
++  void ObserveName(const AtomicString&, bool is_id);
++  void Trace(Visitor*) const override;
++
++ private:
++  void QueueCosmeticSelectors(const std::vector<std::string_view>&);
++  void ApplyCosmeticSelectors();
++  // Keep the native filter alive for as long as its borrowed interface is used.
++  Member<SubresourceFilter> owner_;
++  WebDocumentSubresourceFilter* subresource_filter_;
++  HashSet<String> cosmetic_selectors_;
++  bool cosmetic_update_pending_ = false;
++  bool cosmetic_sheet_injected_ = false;
++  bool generic_cosmetic_disabled_ = false;
++};
++}  // namespace blink
++#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_SENDA_COSMETIC_FILTER_H_
+diff --git a/third_party/blink/renderer/core/loader/senda_cosmetic_filter.cc b/third_party/blink/renderer/core/loader/senda_cosmetic_filter.cc
+new file mode 100644
+--- /dev/null
++++ b/third_party/blink/renderer/core/loader/senda_cosmetic_filter.cc
+@@ -0,0 +1,171 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "third_party/blink/renderer/core/loader/senda_cosmetic_filter.h"
++
++#include <array>
++#include <string_view>
++
++#include "base/location.h"
++#include "base/task/single_thread_task_runner.h"
++#include "third_party/blink/public/platform/task_type.h"
++#include "third_party/blink/public/platform/web_document_subresource_filter.h"
++#include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
++#include "third_party/blink/renderer/core/css/style_engine.h"
++#include "third_party/blink/renderer/core/css/style_sheet_contents.h"
++#include "third_party/blink/renderer/core/dom/document.h"
++#include "third_party/blink/renderer/core/frame/local_dom_window.h"
++#include "third_party/blink/renderer/core/loader/document_loader.h"
++#include "third_party/blink/renderer/core/loader/subresource_filter.h"
++#include "third_party/blink/renderer/platform/wtf/functional.h"
++#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
++#include "third_party/blink/renderer/platform/weborigin/security_origin.h"
++#include "url/origin.h"
++
++namespace blink {
++namespace {
++
++#include "third_party/senda_filter_lists/CosmeticExceptions.inc"
++
++template <size_t D, size_t P, size_t U>
++bool MatchesCosmeticException(
++    std::string_view host,
++    std::string_view document_url,
++    std::string_view origin_url,
++    const std::array<std::string_view, D>& domains,
++    const std::array<std::string_view, P>& prefixes,
++    const std::array<std::string_view, U>& url_substrings) {
++  for (auto domain : domains) {
++    if (host == domain ||
++        (host.size() > domain.size() && host.ends_with(domain) &&
++         host[host.size() - domain.size() - 1] == '.')) {
++      return true;
++    }
++  }
++  // Domain anchors may start at a parent hostname boundary.
++  for (auto suffix = host; !suffix.empty();) {
++    for (auto prefix : prefixes) {
++      if (suffix.starts_with(prefix)) {
++        return true;
++      }
++    }
++    const auto dot = suffix.find('.');
++    if (dot == std::string_view::npos) {
++      break;
++    }
++    suffix.remove_prefix(dot + 1);
++  }
++  for (auto fragment : url_substrings) {
++    if (document_url.find(fragment) != std::string_view::npos ||
++        origin_url.find(fragment) != std::string_view::npos) {
++      return true;
++    }
++  }
++  return false;
++}
++
++}  // namespace
++
++const char SendaCosmeticFilter::kSupplementName[] = "SendaCosmeticFilter";
++SendaCosmeticFilter::SendaCosmeticFilter(
++    Document& document,
++    SubresourceFilter* owner,
++    WebDocumentSubresourceFilter* filter)
++    : Supplement<Document>(document), owner_(owner), subresource_filter_(filter) {}
++
++SendaCosmeticFilter* SendaCosmeticFilter::FromIfExists(Document& document) {
++  return Supplement<Document>::From<SendaCosmeticFilter>(document);
++}
++
++void SendaCosmeticFilter::Initialize() {
++  if (subresource_filter_->IsDryRun()) {
++    return;
++  }
++  const auto& document = *GetSupplementable();
++  if (!document.domWindow()) {
++    generic_cosmetic_disabled_ = true;
++    return;
++  }
++  const auto* origin = document.domWindow()->GetSecurityOrigin()
++                           ->GetOriginOrPrecursorOriginIfOpaque();
++  const std::string host = origin->Host().Utf8();
++  const std::string document_url = document.Url().GetString().Utf8();
++  const std::string origin_url = origin->ToUrlOrigin().GetURL().spec();
++  const bool all_disabled = kSendaDisableAllCosmetic || MatchesCosmeticException(
++      host, document_url, origin_url, kSendaAllCosmeticDomains,
++      kSendaAllCosmeticHostPrefixes, kSendaAllCosmeticUrlSubstrings);
++  generic_cosmetic_disabled_ = all_disabled || kSendaDisableAllGenericCosmetic ||
++      MatchesCosmeticException(host, document_url, origin_url,
++          kSendaGenericCosmeticDomains, kSendaGenericCosmeticHostPrefixes,
++          kSendaGenericCosmeticUrlSubstrings);
++  if (all_disabled) {
++    return;
++  }
++  std::vector<std::string_view> selectors;
++  subresource_filter_->GetDomainSelectors(selectors);
++  QueueCosmeticSelectors(selectors);
++}
++
++void SendaCosmeticFilter::ObserveName(const AtomicString& name, bool is_id) {
++  // The bundled generic selectors use ASCII anchors. Its AtomicString hash
++  // matches the ruleset index, avoiding allocations for ordinary attributes.
++  if (generic_cosmetic_disabled_ || name.empty() ||
++      !name.GetString().ContainsOnlyAsciiOrEmpty() ||
++      subresource_filter_->IsDryRun() ||
++      !subresource_filter_->MaybeHasStyleRule(name.Hash())) {
++    return;
++  }
++  std::vector<std::string_view> selectors;
++  const auto utf8_name = name.Utf8();
++  if (is_id) {
++    subresource_filter_->GetSelectorsById(utf8_name, name.Hash(), selectors);
++  } else {
++    subresource_filter_->GetSelectorsByClass(utf8_name, name.Hash(), selectors);
++  }
++  QueueCosmeticSelectors(selectors);
++}
++
++void SendaCosmeticFilter::QueueCosmeticSelectors(
++    const std::vector<std::string_view>& selectors) {
++  bool changed = false;
++  for (auto selector : selectors) {
++    changed |= cosmetic_selectors_.insert(String::FromUtf8(selector)).is_new_entry;
++  }
++  if (!changed || cosmetic_update_pending_) {
++    return;
++  }
++  cosmetic_update_pending_ = true;
++  GetSupplementable()->GetTaskRunner(TaskType::kInternalLoading)->PostTask(
++      FROM_HERE, BindOnce(&SendaCosmeticFilter::ApplyCosmeticSelectors,
++                          WrapWeakPersistent(this)));
++}
++
++void SendaCosmeticFilter::ApplyCosmeticSelectors() {
++  cosmetic_update_pending_ = false;
++  Document& document = *GetSupplementable();
++  if (!document.IsActive() || !document.GetFrame() || !document.Loader() ||
++      document.Loader()->GetSubresourceFilter() != owner_.Get()) {
++    return;
++  }
++  StringBuilder css;
++  for (const auto& selector : cosmetic_selectors_) {
++    css.Append(selector);
++    css.Append("{display:none!important;}\n");
++  }
++  auto* sheet = MakeGarbageCollected<StyleSheetContents>(
++      MakeGarbageCollected<CSSParserContext>(document));
++  sheet->ParseString(css.ToString());
++  const AtomicString key("senda-cosmetic-filter");
++  if (cosmetic_sheet_injected_) {
++    document.GetStyleEngine().RemoveInjectedSheet(key, WebCssOrigin::kUser);
++  }
++  document.GetStyleEngine().InjectSheet(key, sheet, WebCssOrigin::kUser);
++  cosmetic_sheet_injected_ = true;
++}
++
++void SendaCosmeticFilter::Trace(Visitor* visitor) const {
++  visitor->Trace(owner_);
++  Supplement<Document>::Trace(visitor);
++}
++}  // namespace blink

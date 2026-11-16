@@ -18,10 +18,28 @@
     }
   ],
   "network_rules": 106891,
-  "cosmetic_rules_parsed_but_not_activated": 23845,
-  "sha256": "ed1720911678478563bbf57b27b8246883529cb218aea0244c1e4684a1826b7d",
-  "bytes": 4179410,
+  "cosmetic_rules": {
+    "parsed": 23845,
+    "compiled": 23533,
+    "omitted": 312
+  },
+  "cosmetic_exceptions": {
+    "generic_domains": 183,
+    "all_domains": 0,
+    "generic_prefixes": 2,
+    "all_prefixes": 0,
+    "generic_url_substrings": 6,
+    "all_url_substrings": 0,
+    "disable_all_generic": false,
+    "disable_all_cosmetic": false,
+    "source_rules": 167,
+    "fallback_rules": 0,
+    "bytes": 4763,
+    "sha256": "a03d5bd96e5c8401f818d3b4ca4cca6d39d565af64fd6e87ac8fb6f916e66578"
+  },
+  "sha256": "8b55a844533e1f3583ba206a9c94a5c9a2e8960936823fc4f053656495a0e6c4",
+  "bytes": 5349888,
   "license": "CC-BY-SA-3.0",
   "authors": "The EasyList authors (https://easylist.to/)",
-  "changes": "Converted supported URL rules with Chromium. Unsupported rules are omitted; cosmetic rules are not activated."
+  "changes": "Converted supported URL and CSS rules with Chromium. Negative CSS domains become explicit exceptions. Cosmetic activation exceptions are preserved conservatively; unsupported hiding syntax is omitted."
 }

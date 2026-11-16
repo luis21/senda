@@ -19,20 +19,28 @@ def verify_snapshot(directory):
         raise ValueError('Snapshot checksum mismatch')
     if manifest.get('license') != 'CC-BY-SA-3.0' or not (directory/'LICENSE').is_file():
         raise ValueError('Missing snapshot license')
+    if 'cosmetic_exceptions' in manifest:
+        metadata = manifest['cosmetic_exceptions']
+        header = (directory/'CosmeticExceptions.inc').read_bytes()
+        if not 0 < len(header) <= 1024*1024 or metadata.get('bytes') != len(header) or metadata.get('sha256') != hashlib.sha256(header).hexdigest():
+            raise ValueError('Cosmetic exception checksum or size mismatch')
     return manifest
 
 def sync_snapshot(directory, chromium_root):
     manifest = verify_snapshot(directory)
     target = Path(chromium_root)/'third_party/senda_filter_lists'
     target.mkdir(parents=True, exist_ok=True)
-    for name in ('UnindexedRules', 'LICENSE', 'manifest.json'):
+    names = ['UnindexedRules', 'LICENSE', 'manifest.json']
+    if 'cosmetic_exceptions' in manifest:
+        names.append('CosmeticExceptions.inc')
+    for name in names:
         shutil.copyfile(Path(directory)/name, target/name)
     versions = ', '.join(item['version'] for item in manifest['sources'])
     (target/'README.chromium').write_text(
         'Name: EasyList and EasyPrivacy\nShort Name: senda_filter_lists\nURL: https://easylist.to/\n'
         'Version: '+versions+'\nLicense: CC-BY-SA-3.0\nLicense File: LICENSE\nSecurity Critical: yes\nShipped: yes\n\n'
-        'Description:\nSupported network URL rules for the Senda native blocker.\n\n'
-        'Local Modifications:\nConverted with Chromium ruleset_converter; unsupported and cosmetic rules are not activated.\n', encoding='utf-8')
+        'Description:\nSupported network URL and cosmetic CSS rules for the Senda native blocker.\n\n'
+        'Local Modifications:\nConverted with Chromium ruleset_converter; negative CSS domains become explicit exceptions and unsupported syntax is omitted.\n', encoding='utf-8')
     return manifest
 
 if __name__ == '__main__':

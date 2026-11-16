@@ -8,7 +8,9 @@ La base de Chromium y la identidad inicial Senda están compiladas. La página d
 
 El ahorro de memoria está activado inicialmente en modo equilibrado (15 minutos), con modos de 60 y 5 minutos y exclusiones nativas. Una comparación local de 14 páginas sintéticas confirmó menos memoria privada con el modo máximo, conservación de las pestañas protegidas y reactivación. No equivale a una comparación contra Chrome comercial. Evidencia y cifras: `docs/validation/2026-11-15-memory.md`.
 
-Siguen pendientes el filtrado cosmético, el panel propio de protección, la actualización automática de listas, la comparación de memoria con Chrome y sitios reales, el instalador y las actualizaciones seguras del navegador. Esta versión no es una entrega pública terminada. Evidencia del bloqueo y sus límites: `docs/validation/2026-11-15-protection.md`.
+El filtrado cosmético nativo oculta elementos mediante reglas por dominio, clase e identificador; también cubre cambios dinámicos y plantillas HTML. Se conservan las excepciones cosméticas de las listas. El panel de la barra muestra estado, solicitudes bloqueadas y un control para cambiar la excepción del sitio. Se verificaron el contador activo, las solicitudes tardías y su reinicio al navegar; la validación visual final del estado desactivado y la prueba ejecutada del control reversible siguen pendientes. Evidencia y límites: `docs/validation/2026-11-15-cosmetic-protection.md`.
+
+Siguen pendientes la actualización automática de listas, ampliar las pruebas de compatibilidad y extensiones, la comparación de memoria con Chrome y sitios reales, el instalador y las actualizaciones seguras del navegador. Esta versión no es una entrega pública terminada. La primera capa de bloqueo de red se documenta en `docs/validation/2026-11-15-protection.md`.
 
 ## Abrir la compilación
 

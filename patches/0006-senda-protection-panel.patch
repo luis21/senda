@@ -1,0 +1,519 @@
+diff --git a/components/subresource_filter/content/mojom/subresource_filter.mojom b/components/subresource_filter/content/mojom/subresource_filter.mojom
+--- a/components/subresource_filter/content/mojom/subresource_filter.mojom
++++ b/components/subresource_filter/content/mojom/subresource_filter.mojom
+@@ -32,6 +32,10 @@
+   // prompt to inform the user and allow them to turn off filtering.
+   DidDisallowFirstSubresource();
+ 
++  // Senda: one notification for an actually disallowed resource load, including
++  // requests after the load event. Cosmetic selectors do not increment this.
++  SendaDidBlockSubresource();
++
+   // Called when a RenderFrame is created and is tagged as an ad frame. The
+   // browser keeps track of this in case the frame later changes processes, at
+   // which point it will inform the new RenderFrame that it has been tagged as
+diff --git a/components/subresource_filter/content/renderer/web_document_subresource_filter_impl.h b/components/subresource_filter/content/renderer/web_document_subresource_filter_impl.h
+--- a/components/subresource_filter/content/renderer/web_document_subresource_filter_impl.h
++++ b/components/subresource_filter/content/renderer/web_document_subresource_filter_impl.h
+@@ -33,7 +33,8 @@
+     BuilderImpl(url::Origin document_origin,
+                 mojom::ActivationState activation_state,
+                 base::File ruleset_file,
+-                base::OnceClosure first_disallowed_load_callback);
++                base::OnceClosure first_disallowed_load_callback,
++                base::RepeatingClosure blocked_request_callback = {});
+ 
+     BuilderImpl(const BuilderImpl&) = delete;
+     BuilderImpl& operator=(const BuilderImpl&) = delete;
+@@ -47,6 +48,7 @@
+     mojom::ActivationState activation_state_;
+     base::File ruleset_file_;
+     base::OnceClosure first_disallowed_load_callback_;
++    base::RepeatingClosure blocked_request_callback_;
+     scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
+   };
+ 
+@@ -58,7 +60,8 @@
+       url::Origin document_origin,
+       mojom::ActivationState activation_state,
+       scoped_refptr<const MemoryMappedRuleset> ruleset,
+-      base::OnceClosure first_disallowed_load_callback);
++      base::OnceClosure first_disallowed_load_callback,
++      base::RepeatingClosure blocked_request_callback = {});
+ 
+   WebDocumentSubresourceFilterImpl(const WebDocumentSubresourceFilterImpl&) =
+       delete;
+@@ -109,6 +112,7 @@
+   mojom::ActivationState activation_state_;
+   DocumentSubresourceFilter filter_;
+   base::OnceClosure first_disallowed_load_callback_;
++  base::RepeatingClosure blocked_request_callback_;
+   base::WeakPtrFactory<WebDocumentSubresourceFilterImpl> weak_ptr_factory_{
+       this};
+ };
+diff --git a/components/subresource_filter/content/renderer/web_document_subresource_filter_impl.cc b/components/subresource_filter/content/renderer/web_document_subresource_filter_impl.cc
+--- a/components/subresource_filter/content/renderer/web_document_subresource_filter_impl.cc
++++ b/components/subresource_filter/content/renderer/web_document_subresource_filter_impl.cc
+@@ -12,6 +12,7 @@
+ #include "base/functional/callback.h"
+ #include "base/memory/scoped_refptr.h"
+ #include "base/task/single_thread_task_runner.h"
++#include "base/task/bind_post_task.h"
+ #include "components/subresource_filter/content/renderer/filter_utils.h"
+ #include "components/subresource_filter/core/common/constants.h"
+ #include "components/subresource_filter/core/common/load_policy.h"
+@@ -59,14 +60,16 @@
+     url::Origin document_origin,
+     mojom::ActivationState activation_state,
+     scoped_refptr<const MemoryMappedRuleset> ruleset,
+-    base::OnceClosure first_disallowed_load_callback)
++    base::OnceClosure first_disallowed_load_callback,
++    base::RepeatingClosure blocked_request_callback)
+     : activation_state_(activation_state),
+       filter_(std::move(document_origin),
+               activation_state,
+               std::move(ruleset),
+               kSafeBrowsingRulesetConfig.uma_tag),
+       first_disallowed_load_callback_(
+-          std::move(first_disallowed_load_callback)) {}
++          std::move(first_disallowed_load_callback)),
++      blocked_request_callback_(std::move(blocked_request_callback)) {}
+ 
+ WebLoadPolicy WebDocumentSubresourceFilterImpl::GetLoadPolicy(
+     const blink::WebURL& resourceUrl,
+@@ -124,6 +127,9 @@
+   if (!first_disallowed_load_callback_.is_null()) {
+     std::move(first_disallowed_load_callback_).Run();
+   }
++  if (blocked_request_callback_) {
++    blocked_request_callback_.Run();
++  }
+ }
+ 
+ bool WebDocumentSubresourceFilterImpl::ShouldLogToConsole() {
+@@ -149,12 +155,14 @@
+     url::Origin document_origin,
+     mojom::ActivationState activation_state,
+     base::File ruleset_file,
+-    base::OnceClosure first_disallowed_load_callback)
++    base::OnceClosure first_disallowed_load_callback,
++    base::RepeatingClosure blocked_request_callback)
+     : document_origin_(std::move(document_origin)),
+       activation_state_(std::move(activation_state)),
+       ruleset_file_(std::move(ruleset_file)),
+       first_disallowed_load_callback_(
+           std::move(first_disallowed_load_callback)),
++      blocked_request_callback_(std::move(blocked_request_callback)),
+       main_task_runner_(base::SingleThreadTaskRunner::GetCurrentDefault()) {}
+ 
+ WebDocumentSubresourceFilterImpl::BuilderImpl::~BuilderImpl() = default;
+@@ -170,7 +178,9 @@
+   return std::make_unique<WebDocumentSubresourceFilterImpl>(
+       document_origin_, activation_state_, std::move(ruleset),
+       base::BindOnce(&ProxyToTaskRunner, main_task_runner_,
+-                     std::move(first_disallowed_load_callback_)));
++                     std::move(first_disallowed_load_callback_)),
++      blocked_request_callback_ ? base::BindPostTask(main_task_runner_,
++          std::move(blocked_request_callback_)) : base::RepeatingClosure());
+ }
+ 
+ }  // namespace subresource_filter
+diff --git a/components/subresource_filter/content/renderer/subresource_filter_agent.h b/components/subresource_filter/content/renderer/subresource_filter_agent.h
+--- a/components/subresource_filter/content/renderer/subresource_filter_agent.h
++++ b/components/subresource_filter/content/renderer/subresource_filter_agent.h
+@@ -77,6 +77,7 @@
+   // the most recently created document. Not called if all resources are
+   // allowed.
+   virtual void SignalFirstSubresourceDisallowedForCurrentDocument();
++  virtual void SendBlockedRequest();
+ 
+   // Sends statistics about the DocumentSubresourceFilter's work to the browser.
+   virtual void SendDocumentLoadStatistics(
+@@ -116,6 +117,8 @@
+   void RecordHistogramsOnFilterCreation(
+       const mojom::ActivationState& activation_state);
+   void ResetInfoForNextDocument();
++  void ReportBlockedSubresource(uint64_t document_sequence);
++  uint64_t document_sequence_ = 0;
+ 
+   virtual const mojom::ActivationState
+   GetInheritedActivationStateForNewDocument();
+diff --git a/components/subresource_filter/content/renderer/subresource_filter_agent.cc b/components/subresource_filter/content/renderer/subresource_filter_agent.cc
+--- a/components/subresource_filter/content/renderer/subresource_filter_agent.cc
++++ b/components/subresource_filter/content/renderer/subresource_filter_agent.cc
+@@ -299,7 +299,19 @@
+   }
+ }
+ 
++void SubresourceFilterAgent::SendBlockedRequest() {
++  GetSubresourceFilterHost()->SendaDidBlockSubresource();
++}
++
++void SubresourceFilterAgent::ReportBlockedSubresource(uint64_t sequence) {
++  // Worker notifications from a replaced document must not affect a new page.
++  if (sequence == document_sequence_) {
++    SendBlockedRequest();
++  }
++}
++
+ void SubresourceFilterAgent::DidCreateNewDocument() {
++  ++document_sequence_;
+   // TODO(csharrison): Use WebURL and WebSecurityOrigin for efficiency here,
+   // which requires changes to the unit tests.
+   const GURL& url = GetDocumentURL();
+@@ -356,7 +368,9 @@
+                      weak_ptr_factory_.GetWeakPtr()));
+   auto filter = std::make_unique<WebDocumentSubresourceFilterImpl>(
+       url::Origin::Create(url), activation_state, std::move(ruleset),
+-      std::move(first_disallowed_load_callback));
++      std::move(first_disallowed_load_callback),
++      base::BindRepeating(&SubresourceFilterAgent::ReportBlockedSubresource,
++                          weak_ptr_factory_.GetWeakPtr(), document_sequence_));
+   filter_for_last_created_document_ = filter->AsWeakPtr();
+   SetSubresourceFilterForCurrentDocument(std::move(filter));
+ }
+@@ -395,7 +409,9 @@
+           std::move(ruleset_file),
+           base::BindOnce(&SubresourceFilterAgent::
+                              SignalFirstSubresourceDisallowedForCurrentDocument,
+-                         weak_ptr_factory_.GetWeakPtr())));
++                         weak_ptr_factory_.GetWeakPtr()),
++          base::BindRepeating(&SubresourceFilterAgent::ReportBlockedSubresource,
++                              weak_ptr_factory_.GetWeakPtr(), document_sequence_)));
+ }
+ 
+ void SubresourceFilterAgent::OnOverlayPopupAdDetected() {
+diff --git a/components/subresource_filter/content/renderer/subresource_filter_agent_unittest.cc b/components/subresource_filter/content/renderer/subresource_filter_agent_unittest.cc
+--- a/components/subresource_filter/content/renderer/subresource_filter_agent_unittest.cc
++++ b/components/subresource_filter/content/renderer/subresource_filter_agent_unittest.cc
+@@ -64,6 +64,8 @@
+                void(const mojom::DocumentLoadStatistics&));
+   MOCK_METHOD0(SendFrameIsAd, void());
+   MOCK_METHOD0(SendFrameWasCreatedByAdScript, void());
++  void SendBlockedRequest() override { ++blocked_requests; }
++  uint64_t blocked_requests = 0;
+ 
+   bool IsSubresourceFilterChild() override {
+     return !is_subresource_filter_root_;
+@@ -595,6 +597,25 @@
+   filter->ReportDisallowedLoad();
+ }
+ 
++TEST_F(SubresourceFilterAgentTest, SendaCountsReportedLoadsAndRejectsOldDocument) {
++  ASSERT_NO_FATAL_FAILURE(SetTestRulesetToDisallowURLsWithPathSuffix("alpha"));
++  ExpectSubresourceFilterGetsInjected();
++  StartLoadAndSetActivationState(mojom::ActivationLevel::kEnabled);
++  ExpectSignalAboutFirstSubresourceDisallowed();
++  agent()->filter()->ReportDisallowedLoad();
++  agent()->filter()->ReportDisallowedLoad();
++  EXPECT_EQ(2u, agent()->blocked_requests);
++
++  auto previous_filter = agent()->TakeFilter();
++  ExpectSubresourceFilterGetsInjected();
++  StartLoadAndSetActivationState(mojom::ActivationLevel::kEnabled);
++  previous_filter->ReportDisallowedLoad();
++  EXPECT_EQ(2u, agent()->blocked_requests);
++  ExpectSignalAboutFirstSubresourceDisallowed();
++  agent()->filter()->ReportDisallowedLoad();
++  EXPECT_EQ(3u, agent()->blocked_requests);
++}
++
+ TEST_F(SubresourceFilterAgentTest,
+        FailedInitialLoad_FilterInjectedOnInitialDocumentCreation) {
+   ASSERT_NO_FATAL_FAILURE(
+diff --git a/components/subresource_filter/content/browser/content_subresource_filter_throttle_manager.h b/components/subresource_filter/content/browser/content_subresource_filter_throttle_manager.h
+--- a/components/subresource_filter/content/browser/content_subresource_filter_throttle_manager.h
++++ b/components/subresource_filter/content/browser/content_subresource_filter_throttle_manager.h
+@@ -182,6 +182,8 @@
+       content::NavigationThrottleRegistry& registry);
+ 
+   PageLoadStatistics* page_load_statistics() const { return statistics_.get(); }
++  uint64_t blocked_requests() const { return blocked_requests_; }
++  bool is_filtering_enabled();
+ 
+   ProfileInteractionManager* profile_interaction_manager_for_testing() {
+     return profile_interaction_manager_.get();
+@@ -318,6 +320,7 @@
+ 
+   // mojom::SubresourceFilterHost:
+   void DidDisallowFirstSubresource() override;
++  void SendaDidBlockSubresource() override;
+   void FrameIsAd() override;
+   void FrameWasCreatedByAdScript() override;
+   void SetDocumentLoadStatistics(
+@@ -393,6 +396,7 @@
+   std::unique_ptr<VerifiedRuleset::Handle> ruleset_handle_;
+ 
+   std::unique_ptr<PageLoadStatistics> statistics_;
++  uint64_t blocked_requests_ = 0;
+ 
+   // True if the current committed main frame load in this WebContents has
+   // notified the delegate that a subresource was disallowed. The callback
+diff --git a/components/subresource_filter/content/browser/content_subresource_filter_throttle_manager.cc b/components/subresource_filter/content/browser/content_subresource_filter_throttle_manager.cc
+--- a/components/subresource_filter/content/browser/content_subresource_filter_throttle_manager.cc
++++ b/components/subresource_filter/content/browser/content_subresource_filter_throttle_manager.cc
+@@ -5,6 +5,7 @@
+ #include "components/subresource_filter/content/browser/content_subresource_filter_throttle_manager.h"
+ 
+ #include <algorithm>
++#include <limits>
+ #include <utility>
+ 
+ #include "base/check.h"
+@@ -551,6 +552,10 @@
+   content::FrameTreeNodeId frame_tree_node_id =
+       navigation_handle->GetFrameTreeNodeId();
+   navigation_load_policies_[frame_tree_node_id] = load_policy;
++  if (load_policy == LoadPolicy::DISALLOW &&
++      blocked_requests_ < std::numeric_limits<uint64_t>::max()) {
++    ++blocked_requests_;
++  }
+ 
+   blink::FrameAdEvidence& ad_evidence =
+       EnsureFrameAdEvidence(navigation_handle);
+@@ -835,6 +840,21 @@
+   MaybeShowNotification(&receiver_.CurrentTargetFrame());
+ }
+ 
++void ContentSubresourceFilterThrottleManager::SendaDidBlockSubresource() {
++  if (blocked_requests_ < std::numeric_limits<uint64_t>::max()) {
++    ++blocked_requests_;
++  }
++}
++
++bool ContentSubresourceFilterThrottleManager::is_filtering_enabled() {
++  if (!page_) {
++    return false;
++  }
++  const auto state = GetFrameActivationState(&page_->GetMainDocument());
++  return state && state->activation_level == mojom::ActivationLevel::kEnabled &&
++         !state->filtering_disabled_for_document;
++}
++
+ void ContentSubresourceFilterThrottleManager::FrameIsAd() {
+   // `FrameIsAd()` can only be called for an initial empty document. As it won't
+   // pass through `ReadyToCommitNavigation()` (and has not yet passed through
+diff --git a/chrome/browser/ui/content_settings/content_setting_bubble_model.h b/chrome/browser/ui/content_settings/content_setting_bubble_model.h
+--- a/chrome/browser/ui/content_settings/content_setting_bubble_model.h
++++ b/chrome/browser/ui/content_settings/content_setting_bubble_model.h
+@@ -531,6 +531,7 @@
+   void CommitChanges() override;
+ 
+   bool is_checked_ = false;
++  bool allowed_on_open_ = false;
+ };
+ 
+ // The model for automatic downloads setting.
+diff --git a/chrome/browser/ui/content_settings/content_setting_bubble_model.cc b/chrome/browser/ui/content_settings/content_setting_bubble_model.cc
+--- a/chrome/browser/ui/content_settings/content_setting_bubble_model.cc
++++ b/chrome/browser/ui/content_settings/content_setting_bubble_model.cc
+@@ -21,6 +21,7 @@
+ #include "base/notreached.h"
+ #include "base/scoped_observation.h"
+ #include "base/strings/utf_string_conversions.h"
++#include "base/strings/string_number_conversions.h"
+ #include "build/build_config.h"
+ #include "chrome/browser/browser_process.h"
+ #include "chrome/browser/content_settings/chrome_content_settings_utils.h"
+@@ -76,6 +77,7 @@
+ #include "components/url_formatter/url_formatter.h"
+ #include "components/vector_icons/vector_icons.h"
+ #include "content/public/browser/page.h"
++#include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/permission_controller.h"
+ #include "content/public/browser/permission_descriptor_util.h"
+ #include "content/public/browser/render_process_host.h"
+@@ -1537,11 +1539,16 @@
+     ContentSettingSubresourceFilterBubbleModel(Delegate* delegate,
+                                                content::Page& page)
+     : ContentSettingBubbleModel(delegate, page) {
++  ContentSetting setting;
++  set_is_user_modifiable(GetSettingManagedByUser(
++      GetPage().GetMainDocument().GetLastCommittedURL(), ContentSettingsType::ADS,
++      GetProfile(), &setting));
++  allowed_on_open_ = setting == CONTENT_SETTING_ALLOW;
+   SetTitle();
+   SetMessage();
+   SetManageText();
+   set_done_button_text(l10n_util::GetStringUTF16(IDS_OK));
+-  set_show_learn_more(true);
++  set_show_learn_more(false);
+   subresource_filter::ContentSubresourceFilterThrottleManager::LogAction(
+       subresource_filter::SubresourceFilterAction::kDetailsShown);
+ }
+@@ -1550,16 +1557,29 @@
+     ~ContentSettingSubresourceFilterBubbleModel() = default;
+ 
+ void ContentSettingSubresourceFilterBubbleModel::SetTitle() {
+-  set_title(l10n_util::GetStringUTF16(IDS_BLOCKED_ADS_PROMPT_TITLE));
++  set_title(u"Protecci\u00f3n de Senda");
+ }
+ 
+ void ContentSettingSubresourceFilterBubbleModel::SetManageText() {
+-  set_manage_text(l10n_util::GetStringUTF16(IDS_ALWAYS_ALLOW_ADS));
++  set_manage_text(allowed_on_open_ ? u"Activar protecci\u00f3n en este sitio"
++                                  : u"Desactivar protecci\u00f3n en este sitio");
+   set_manage_text_style(ContentSettingBubbleModel::ManageTextStyle::kCheckbox);
+ }
+ 
+ void ContentSettingSubresourceFilterBubbleModel::SetMessage() {
+-  set_message(l10n_util::GetStringUTF16(IDS_BLOCKED_ADS_PROMPT_EXPLANATION));
++  auto* manager = subresource_filter::ContentSubresourceFilterThrottleManager::FromPage(
++      GetPage());
++  const auto blocked = manager ? manager->blocked_requests() : 0;
++  std::u16string message = allowed_on_open_ ? u"Protecci\u00f3n desactivada para "
++                                          : u"Protecci\u00f3n activada para ";
++  if (!allowed_on_open_ && (!manager || !manager->is_filtering_enabled())) {
++    message = u"Sin filtrado en esta p\u00e1gina de ";
++  }
++  message += base::UTF8ToUTF16(GetPage().GetMainDocument().GetLastCommittedURL().host());
++  message += u".\n\nSolicitudes bloqueadas al abrir este panel: ";
++  message += base::NumberToString16(blocked);
++  message += u".\n\nBloquea solicitudes de anuncios y rastreadores y oculta elementos publicitarios. No garantiza la ausencia de seguimiento.";
++  set_message(message);
+ }
+ 
+ void ContentSettingSubresourceFilterBubbleModel::OnManageCheckboxChecked(
+@@ -1577,15 +1597,21 @@
+ }
+ 
+ void ContentSettingSubresourceFilterBubbleModel::CommitChanges() {
+-  if (is_checked_) {
+-    if (GetPage().IsPrimary()) {
+-      subresource_filter::ContentSubresourceFilterThrottleManager::FromPage(
+-          GetPage())
+-          ->OnReloadRequested();
++  ContentSetting current;
++  const GURL url = GetPage().GetMainDocument().GetLastCommittedURL();
++  if (is_checked_ && url.SchemeIsHTTPOrHTTPS() &&
++      GetSettingManagedByUser(url, ContentSettingsType::ADS, GetProfile(), &current) &&
++      (current == CONTENT_SETTING_ALLOW) == allowed_on_open_) {
++    auto* map = HostContentSettingsMapFactory::GetForProfile(GetProfile());
++    if (allowed_on_open_) {
++      map->SetContentSettingDefaultScope(url, GURL(), ContentSettingsType::ADS,
++                                         CONTENT_SETTING_BLOCK);
+     } else {
+       subresource_filter::SubresourceFilterContentSettingsManager(
+-          HostContentSettingsMapFactory::GetForProfile(GetProfile()))
+-          .AllowlistSite(GetPage().GetMainDocument().GetLastCommittedURL());
++          map).AllowlistSite(url);
++    }
++    if (GetPage().IsPrimary()) {
++      web_contents()->GetController().Reload(content::ReloadType::NORMAL, true);
+     }
+   }
+ }
+diff --git a/chrome/browser/ui/content_settings/content_setting_bubble_model_unittest.cc b/chrome/browser/ui/content_settings/content_setting_bubble_model_unittest.cc
+--- a/chrome/browser/ui/content_settings/content_setting_bubble_model_unittest.cc
++++ b/chrome/browser/ui/content_settings/content_setting_bubble_model_unittest.cc
+@@ -1104,17 +1104,38 @@
+       new ContentSettingSubresourceFilterBubbleModel(nullptr, page()));
+   const ContentSettingBubbleModel::BubbleContent& bubble_content =
+       content_setting_bubble_model->bubble_content();
+-  EXPECT_EQ(bubble_content.title,
+-            l10n_util::GetStringUTF16(IDS_BLOCKED_ADS_PROMPT_TITLE));
+-  EXPECT_EQ(bubble_content.message,
+-            l10n_util::GetStringUTF16(IDS_BLOCKED_ADS_PROMPT_EXPLANATION));
++  EXPECT_EQ(bubble_content.title, u"Protecci\u00f3n de Senda");
++  EXPECT_NE(bubble_content.message.find(u"Solicitudes bloqueadas"),
++            std::u16string::npos);
+   EXPECT_EQ(0U, bubble_content.radio_group.radio_items.size());
+   EXPECT_EQ(0, bubble_content.radio_group.default_item);
+-  EXPECT_TRUE(bubble_content.show_learn_more);
++  EXPECT_FALSE(bubble_content.show_learn_more);
+   EXPECT_TRUE(bubble_content.custom_link.empty());
+   EXPECT_FALSE(bubble_content.custom_link_enabled);
+   EXPECT_EQ(bubble_content.manage_text,
+-            l10n_util::GetStringUTF16(IDS_ALWAYS_ALLOW_ADS));
++            u"Desactivar protecci\u00f3n en este sitio");
++}
++
++TEST_F(ContentSettingBubbleModelTest, SendaSubresourceFilterReversibleException) {
++  const GURL url("https://example.test");
++  WebContentsTester::For(web_contents())->NavigateAndCommit(url);
++  auto* map = HostContentSettingsMapFactory::GetForProfile(profile());
++  for (ContentSetting initial : {CONTENT_SETTING_BLOCK, CONTENT_SETTING_ALLOW}) {
++    map->SetContentSettingDefaultScope(url, GURL(), ContentSettingsType::ADS, initial);
++    std::unique_ptr<ContentSettingBubbleModel> model(
++        new ContentSettingSubresourceFilterBubbleModel(nullptr, page()));
++    EXPECT_EQ(model->bubble_content().manage_text,
++              initial == CONTENT_SETTING_ALLOW ? u"Activar protecci\u00f3n en este sitio"
++                                               : u"Desactivar protecci\u00f3n en este sitio");
++    model->OnManageCheckboxChecked(true);
++    model->CommitChanges();
++    EXPECT_EQ(map->GetContentSetting(url, GURL(), ContentSettingsType::ADS),
++              initial == CONTENT_SETTING_ALLOW ? CONTENT_SETTING_BLOCK : CONTENT_SETTING_ALLOW);
++    // Committing the same bubble twice must not reverse the user's choice.
++    model->CommitChanges();
++    EXPECT_EQ(map->GetContentSetting(url, GURL(), ContentSettingsType::ADS),
++              initial == CONTENT_SETTING_ALLOW ? CONTENT_SETTING_BLOCK : CONTENT_SETTING_ALLOW);
++  }
+ }
+ 
+ TEST_F(ContentSettingBubbleModelTest, SubresourceFilterNavigated) {
+diff --git a/chrome/browser/ui/content_settings/content_setting_image_model.cc b/chrome/browser/ui/content_settings/content_setting_image_model.cc
+--- a/chrome/browser/ui/content_settings/content_setting_image_model.cc
++++ b/chrome/browser/ui/content_settings/content_setting_image_model.cc
+@@ -23,6 +23,7 @@
+ #include "chrome/browser/permissions/quiet_notification_permission_ui_state.h"
+ #include "chrome/browser/permissions/system/system_permission_settings.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "components/subresource_filter/content/browser/content_subresource_filter_throttle_manager.h"
+ #include "chrome/browser/ui/blocked_content/framebust_block_tab_helper.h"
+ #include "chrome/browser/ui/browser_element_identifiers.h"
+ #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
+@@ -803,6 +804,24 @@
+ bool ContentSettingBlockedImageModel::UpdateAndGetVisibility(
+     WebContents* web_contents) {
+   const ContentSettingsType type = content_type();
++  if (type == ContentSettingsType::ADS) {
++    const GURL& url = web_contents->GetLastCommittedURL();
++    if (!url.SchemeIsHTTPOrHTTPS()) {
++      return false;
++    }
++    auto* profile = Profile::FromBrowserContext(web_contents->GetBrowserContext());
++    const bool enabled = HostContentSettingsMapFactory::GetForProfile(profile)
++        ->GetContentSetting(url, GURL(), type) != CONTENT_SETTING_ALLOW;
++    SetIcon(type, enabled);
++    set_explanatory_string_id(0);
++    auto* manager = subresource_filter::ContentSubresourceFilterThrottleManager::FromPage(
++        web_contents->GetPrimaryPage());
++    set_tooltip(!enabled ? u"Senda: protecci\u00f3n desactivada"
++                        : manager && manager->is_filtering_enabled()
++                              ? u"Senda: protecci\u00f3n activada"
++                              : u"Senda: sin filtrado en esta p\u00e1gina");
++    return true;
++  }
+   const ContentSettingsImageDetails* image_details = GetImageDetails(type);
+   DCHECK(image_details) << "No entry for " << static_cast<int32_t>(type)
+                         << " in kImageDetails[].";
+diff --git a/chrome/browser/ui/content_settings/content_setting_image_model_unittest.cc b/chrome/browser/ui/content_settings/content_setting_image_model_unittest.cc
+--- a/chrome/browser/ui/content_settings/content_setting_image_model_unittest.cc
++++ b/chrome/browser/ui/content_settings/content_setting_image_model_unittest.cc
+@@ -655,10 +655,26 @@
+   EXPECT_FALSE(content_setting_image_model->is_visible());
+   EXPECT_TRUE(content_setting_image_model->get_tooltip().empty());
+ 
++  // Senda keeps the control available before any ad is blocked, and also on
++  // excluded sites so that protection can be enabled again.
++  content_setting_image_model->Update(web_contents());
++  EXPECT_TRUE(content_setting_image_model->is_visible());
++  HostContentSettingsMapFactory::GetForProfile(profile())
++      ->SetContentSettingDefaultScope(web_contents()->GetLastCommittedURL(),
++                                     GURL(), ContentSettingsType::ADS,
++                                     CONTENT_SETTING_ALLOW);
++  content_setting_image_model->Update(web_contents());
++  EXPECT_TRUE(content_setting_image_model->is_visible());
++  EXPECT_EQ(content_setting_image_model->get_tooltip(),
++            u"Senda: protecci\u00f3n desactivada");
++
+   content_settings->OnContentBlocked(ContentSettingsType::ADS);
+   UpdateModelAndVerifyStates(content_setting_image_model.get(),
+                              /* is_visible = */ true,
+                              /* tooltip_empty = */ false);
++  NavigateAndCommit(GURL("chrome://settings"));
++  content_setting_image_model->Update(web_contents());
++  EXPECT_FALSE(content_setting_image_model->is_visible());
+ }
+ 
+ TEST_F(ContentSettingImageModelTest, NotificationsIconVisibility) {
