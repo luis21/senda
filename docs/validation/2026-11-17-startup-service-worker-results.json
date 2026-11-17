@@ -1,0 +1,195 @@
+[
+  {
+    "browserKind": "Senda",
+    "revision": "fb096c0011f9d50f0a264a9376420cdea9c421e3",
+    "headed": true,
+    "status": "FAIL",
+    "phase": "browser restart",
+    "startedUtc": "2026-11-17T13:26:52.251Z",
+    "completedUtc": "2026-11-17T13:27:30.428Z",
+    "localArtifact": ".profiles/compatibility-headed1/report.json",
+    "passedStages": [
+      "baseline without extension",
+      "extension installation",
+      "extension APIs",
+      "worker stop and reactivation",
+      "extension update page",
+      "extension update",
+      "restart with extension"
+    ],
+    "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:",
+    "webFailure": "not found"
+  },
+  {
+    "browserKind": "Senda",
+    "revision": "fb096c0011f9d50f0a264a9376420cdea9c421e3",
+    "headed": true,
+    "startupProbe": false,
+    "navigationAfterStart": true,
+    "status": "PASS",
+    "phase": "complete",
+    "startedUtc": "2026-11-17T13:35:33.635Z",
+    "completedUtc": "2026-11-17T13:36:18.795Z",
+    "localArtifact": ".profiles/compatibility-headed-post-start/report.json",
+    "passedStages": [
+      "baseline without extension",
+      "extension installation",
+      "extension APIs",
+      "worker stop and reactivation",
+      "extension update page",
+      "extension update",
+      "restart with extension",
+      "browser restart"
+    ]
+  },
+  {
+    "browserKind": "Senda",
+    "revision": "fb096c0011f9d50f0a264a9376420cdea9c421e3",
+    "headed": true,
+    "startupProbe": true,
+    "status": "FAIL",
+    "phase": "startup probe: dnr-permission-only",
+    "startedUtc": "2026-11-17T13:33:19.739Z",
+    "completedUtc": "2026-11-17T13:34:22.952Z",
+    "localArtifact": ".profiles/compatibility-startup-matrix1/report.json",
+    "passedStages": [
+      "no-extension fresh",
+      "no-extension cold restart",
+      "no-extension reloaded",
+      "empty-extension fresh",
+      "empty-extension cold restart",
+      "empty-extension reloaded"
+    ],
+    "error": "Error: Timeout: web API fixture",
+    "startupCases": [
+      {
+        "name": "no-extension",
+        "afterStart": false,
+        "coldResponse": "local-service-worker",
+        "reloadedResponse": "local-service-worker",
+        "failed": false
+      },
+      {
+        "name": "empty-extension",
+        "afterStart": false,
+        "coldResponse": "local-service-worker",
+        "reloadedResponse": "local-service-worker",
+        "failed": false
+      }
+    ]
+  },
+  {
+    "browserKind": "Senda",
+    "revision": "fb096c0011f9d50f0a264a9376420cdea9c421e3",
+    "headed": true,
+    "startupProbe": true,
+    "navigationAfterStart": false,
+    "status": "FAIL",
+    "phase": "startup probe: dnr-navigation-after-start",
+    "startedUtc": "2026-11-17T13:37:36.339Z",
+    "completedUtc": "2026-11-17T13:38:45.142Z",
+    "localArtifact": ".profiles/compatibility-senda-startup-matrix2/report.json",
+    "passedStages": [
+      "no-extension fresh",
+      "no-extension cold restart",
+      "no-extension reloaded",
+      "empty-extension fresh",
+      "empty-extension cold restart",
+      "empty-extension reloaded",
+      "dnr-permission-only fresh",
+      "dnr-permission-only reloaded",
+      "dnr-navigation-after-start fresh",
+      "dnr-navigation-after-start cold restart",
+      "dnr-navigation-after-start reloaded"
+    ],
+    "error": "AssertionError [ERR_ASSERTION]: Web compatibility failures after cold restart",
+    "startupCases": [
+      {
+        "name": "no-extension",
+        "afterStart": false,
+        "coldResponse": "local-service-worker",
+        "reloadedResponse": "local-service-worker",
+        "failed": false
+      },
+      {
+        "name": "empty-extension",
+        "afterStart": false,
+        "coldResponse": "local-service-worker",
+        "reloadedResponse": "local-service-worker",
+        "failed": false
+      },
+      {
+        "name": "dnr-permission-only",
+        "afterStart": false,
+        "coldResponse": "not found",
+        "reloadedResponse": "local-service-worker",
+        "failed": true
+      },
+      {
+        "name": "dnr-navigation-after-start",
+        "afterStart": true,
+        "coldResponse": "local-service-worker",
+        "reloadedResponse": "local-service-worker",
+        "failed": false
+      }
+    ],
+    "webFailure": "not found"
+  },
+  {
+    "browserKind": "Chrome for Testing",
+    "revision": "fb096c0011f9d50f0a264a9376420cdea9c421e3",
+    "headed": true,
+    "startupProbe": true,
+    "navigationAfterStart": false,
+    "status": "FAIL",
+    "phase": "startup probe: dnr-navigation-after-start",
+    "startedUtc": "2026-11-17T13:35:54.341Z",
+    "completedUtc": "2026-11-17T13:36:12.115Z",
+    "localArtifact": ".profiles/compatibility-reference-startup-matrix/report.json",
+    "passedStages": [
+      "no-extension fresh",
+      "no-extension cold restart",
+      "no-extension reloaded",
+      "empty-extension fresh",
+      "empty-extension cold restart",
+      "empty-extension reloaded",
+      "dnr-permission-only fresh",
+      "dnr-permission-only reloaded",
+      "dnr-navigation-after-start fresh",
+      "dnr-navigation-after-start cold restart",
+      "dnr-navigation-after-start reloaded"
+    ],
+    "error": "AssertionError [ERR_ASSERTION]: Web compatibility failures after cold restart",
+    "startupCases": [
+      {
+        "name": "no-extension",
+        "afterStart": false,
+        "coldResponse": "local-service-worker",
+        "reloadedResponse": "local-service-worker",
+        "failed": false
+      },
+      {
+        "name": "empty-extension",
+        "afterStart": false,
+        "coldResponse": "local-service-worker",
+        "reloadedResponse": "local-service-worker",
+        "failed": false
+      },
+      {
+        "name": "dnr-permission-only",
+        "afterStart": false,
+        "coldResponse": "not found",
+        "reloadedResponse": "local-service-worker",
+        "failed": true
+      },
+      {
+        "name": "dnr-navigation-after-start",
+        "afterStart": true,
+        "coldResponse": "local-service-worker",
+        "reloadedResponse": "local-service-worker",
+        "failed": false
+      }
+    ],
+    "webFailure": "not found"
+  }
+]

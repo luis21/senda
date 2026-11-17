@@ -13,6 +13,9 @@ const relative=path.relative(path.join(root,'.profiles'),runRoot);
 assert.ok(/^compatibility-[a-z0-9-]+$/i.test(relative),'Use a new immediate child .profiles/compatibility-*');
 const manifest=JSON.parse(await readFile('config/chromium.json','utf8'));
 const reference=process.argv.includes('--reference');
+const headed=process.argv.includes('--headed');
+const startupProbe=process.argv.includes('--startup-probe');
+const navigationAfterStart=process.argv.includes('--navigate-after-start');
 let referenceMetadata;
 if(reference) {
   referenceMetadata=JSON.parse(await readFile('.tools/chrome-reference-156.json','utf8'));
@@ -33,7 +36,7 @@ await mkdir('.tools',{recursive:true});
 const extension=path.join(runRoot,'extension');
 await mkdir(extension);
 for(const file of ['manifest.json','worker.js','content.js']) await copyFile('tests/fixtures/compat-extension/'+file,path.join(extension,file));
-const report={startedUtc:new Date().toISOString(),revision:manifest.revision,browserKind:reference?'Chrome for Testing':'Senda',referenceMetadata,status:'running',stages:[]};
+const report={startedUtc:new Date().toISOString(),revision:manifest.revision,browserKind:reference?'Chrome for Testing':'Senda',headed,startupProbe,navigationAfterStart,referenceMetadata,status:'running',stages:[]};
 const requests=[];
 const wasm=Buffer.from([0,97,115,109,1,0,0,0,1,7,1,96,2,127,127,1,127,3,2,1,0,7,7,1,3,97,100,100,0,0,10,9,1,7,0,32,0,32,1,106,11]);
 let port,active;
@@ -74,14 +77,14 @@ async function until(predicate,label,timeout=20000) {
   } while(Date.now()<deadline);
   throw Error('Timeout: '+label);
 }
-async function start(profile,withExtension,loadExtension=withExtension) {
+async function start(profile,withExtension,loadExtension=withExtension,{afterStart=navigationAfterStart,extensionPath=extension}={}) {
   await mkdir(profile,{recursive:true});
   await rm(path.join(profile,'DevToolsActivePort'),{force:true});
   const binary=path.join(root,reference?'.tools/chrome-reference-156/chrome-win64/chrome.exe':'.chromium/src/out/SendaDev/chrome.exe');
-  const process=spawn(binary,['--headless',`--user-data-dir=${profile}`,'--remote-debugging-port=0',
+  const process=spawn(binary,[...(headed?[]:['--headless']),`--user-data-dir=${profile}`,'--remote-debugging-port=0',
     '--no-first-run','--no-default-browser-check','--no-proxy-server','--allow-chrome-scheme-url','--disable-sync',
     '--host-resolver-rules=MAP ad.doubleclick.net 127.0.0.1, MAP localhost 127.0.0.1',
-    ...(withExtension?[`--disable-extensions-except=${extension}`,...(loadExtension?[`--load-extension=${extension}`]:[])]:['--disable-extensions']),origin+'/page',
+    ...(withExtension?[`--disable-extensions-except=${extensionPath}`,...(loadExtension?[`--load-extension=${extensionPath}`]:[])]:['--disable-extensions']),afterStart?'about:blank':origin+'/page',
   ],{windowsHide:true,stdio:['ignore','ignore','pipe']});
   let stderr='';process.stderr.on('data',data=>{stderr=(stderr+data).slice(-16000);});
   process.on('error',error=>{stderr+='\n'+error.message;});
@@ -91,9 +94,10 @@ async function start(profile,withExtension,loadExtension=withExtension) {
     try{return (await readFile(path.join(profile,'DevToolsActivePort'),'utf8')).trim().split('\n');}catch{return false;}
   },'browser endpoint',60000);
   active.cdp=await connect(+endpoint[0],endpoint[1]);
-  const target=await until(async()=> (await active.cdp.send('Target.getTargets')).targetInfos.find(t=>t.type==='page'&&t.url===origin+'/page'),'controlled page');
+  const target=await until(async()=> (await active.cdp.send('Target.getTargets')).targetInfos.find(t=>t.type==='page'&&t.url===(afterStart?'about:blank':origin+'/page')),'controlled page');
   active.session=(await active.cdp.send('Target.attachToTarget',{targetId:target.targetId,flatten:true})).sessionId;
   await active.cdp.send('Page.enable',{},active.session);
+  if(afterStart)await active.cdp.send('Page.navigate',{url:origin+'/page'},active.session);
   await until(()=>evaluate('window.webReady===true'),'web API fixture');
 }
 async function stop() {
@@ -173,6 +177,44 @@ async function developerConfiguration(enable=false,reloadId=null) {
   } finally {await active.cdp.send('Target.closeTarget',{targetId:target});}
 }
 try {
+  if(startupProbe) {
+    report.startupCases=[];
+    const failures=[];
+    const specimens=[
+      {name:'no-extension',withExtension:false},
+      {name:'empty-extension',withExtension:true},
+      {name:'dnr-permission-only',withExtension:true,dnr:true},
+      {name:'dnr-navigation-after-start',withExtension:true,dnr:true,afterStart:true},
+    ];
+    const selected=process.argv.find(arg=>arg.startsWith('--startup-case='))?.split('=')[1];
+    assert.ok(!selected||specimens.some(specimen=>specimen.name===selected),'Unknown startup case');
+    for(const specimen of specimens.filter(specimen=>!selected||specimen.name===selected)) {
+      report.phase='startup probe: '+specimen.name;
+      const extensionPath=path.join(runRoot,'extension-'+specimen.name);
+      await mkdir(extensionPath);
+      await writeFile(path.join(extensionPath,'manifest.json'),JSON.stringify({
+        manifest_version:3,name:'Senda startup probe',version:'1.0.0',
+        permissions:specimen.dnr?['declarativeNetRequest']:[],
+      }));
+      const options={extensionPath,afterStart:Boolean(specimen.afterStart)};
+      const profile=path.join(runRoot,specimen.name);
+      const result={name:specimen.name,afterStart:options.afterStart};
+      await start(profile,specimen.withExtension,specimen.withExtension,options);
+      await checkWeb(specimen.name+' fresh',null);await stop();
+      await start(profile,specimen.withExtension,specimen.withExtension,options);
+      result.cold=await evaluate('window.webResults');
+      try {await checkWeb(specimen.name+' cold restart',42);}
+      catch(error) {
+        if(!(error instanceof assert.AssertionError))throw error;
+        result.error=error.message;failures.push(specimen.name);
+      }
+      await reloadPage();result.reloaded=await evaluate('window.webResults');
+      await checkWeb(specimen.name+' reloaded',42);await stop();
+      report.startupCases.push(result);
+      console.log(JSON.stringify({name:result.name,cold:result.cold.serviceWorker,reloaded:result.reloaded.serviceWorker}));
+    }
+    assert.deepEqual(failures,[],'Web compatibility failures after cold restart');
+  } else {
   report.phase='baseline';
   await start(path.join(runRoot,'baseline'),false);
   report.browser=await active.cdp.send('Browser.getVersion');
@@ -239,12 +281,15 @@ try {
   report.stages.push({name:'restart with extension',version:restarted.version,storage:'PASS',DNR:'PASS'});
   await checkWeb('browser restart',42);
   }
+  }
   report.status='PASS';
   report.phase='complete';
 } catch(error) {
   report.status='FAIL';report.error=error.stack;
   if(active) {
     report.browserLog=active.stderr();
+    report.recentRequests=requests.slice(-15);
+    try{report.pageDiagnostic=await evaluate(`({ready:window.webReady,failure:window.webFailure,state:document.readyState,controller:navigator.serviceWorker.controller?.scriptURL})`);}catch{}
     try{report.targets=(await active.cdp.send('Target.getTargets')).targetInfos;}catch{}
   }
   process.exitCode=1;
