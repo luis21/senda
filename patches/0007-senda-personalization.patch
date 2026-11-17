@@ -1,0 +1,459 @@
+diff --git a/chrome/browser/resources/new_tab_page/new_tab_page.html b/chrome/browser/resources/new_tab_page/new_tab_page.html
+--- a/chrome/browser/resources/new_tab_page/new_tab_page.html
++++ b/chrome/browser/resources/new_tab_page/new_tab_page.html
+@@ -31,7 +31,7 @@
+       </form>
+       <p class="engine-note">Buscar con <span id="engine-name">DuckDuckGo</span></p>
+     </section>
+-    <section class="sites" aria-labelledby="sites-heading">
++    <section id="sites" class="sites" aria-labelledby="sites-heading">
+       <div class="section-heading"><h2 id="sites-heading">Tus sitios</h2><button id="add-link" class="text-button" type="button" aria-haspopup="dialog">+ Añadir acceso</button></div>
+       <div id="links" class="links"></div>
+       <div id="empty" class="empty"><span class="empty-symbol" aria-hidden="true">↗</span><p>Lo que visitas, más cerca.</p><span>Añade tus sitios favoritos para tenerlos a mano.</span></div>
+@@ -41,8 +41,16 @@
+   <dialog id="settings-dialog" aria-labelledby="settings-heading">
+     <form id="settings-form">
+       <div class="dialog-heading"><h2 id="settings-heading">A tu manera</h2><button class="close text-button" type="button" data-close="settings-dialog" aria-label="Cerrar personalización">×</button></div>
+-      <p class="dialog-copy">Un espacio cómodo para empezar.</p>
++      <p class="dialog-copy">Elige cómo se siente tu Senda.</p>
++      <h3>Barra y pestañas</h3>
+       <label for="theme">Apariencia</label><select id="theme"><option value="system">Seguir el sistema</option><option value="light">Claro</option><option value="dark">Oscuro</option></select>
++      <label for="palette">Color de Senda</label><select id="palette"><option value="custom">Tema actual</option><option value="blue">Azul · horizonte</option><option value="forest">Verde · bosque</option><option value="clay">Terracota · arcilla</option><option value="violet">Violeta · atardecer</option><option value="slate">Gris · pizarra</option></select>
++      <div class="palette-sample" aria-hidden="true"><span></span><span></span><span></span></div>
++      <p id="appearance-note" class="field-note">El color y la apariencia se aplican a la barra y las pestañas al guardar.</p>
++      <h3>Página de inicio</h3>
++      <label for="background">Fondo</label><select id="background"><option value="plain">Liso</option><option value="mist">Bruma de color</option><option value="lines">Líneas suaves</option></select>
++      <label for="layout">Distribución de accesos</label><select id="layout"><option value="comfortable">Cómoda</option><option value="compact">Compacta</option></select>
++      <label class="check-label"><input id="show-links" type="checkbox"> Mostrar mis sitios</label>
+       <label for="engine">Buscador de esta página</label><select id="engine"><option value="duckduckgo">DuckDuckGo</option><option value="google">Google</option><option value="bing">Bing</option></select>
+       <p class="field-note">Tus preferencias se guardan en este perfil.</p>
+       <div class="dialog-actions"><button type="button" class="secondary" data-close="settings-dialog">Cancelar</button><button type="submit" class="primary">Guardar</button></div>
+diff --git a/chrome/browser/resources/new_tab_page/senda_home.css b/chrome/browser/resources/new_tab_page/senda_home.css
+--- a/chrome/browser/resources/new_tab_page/senda_home.css
++++ b/chrome/browser/resources/new_tab_page/senda_home.css
+@@ -3,8 +3,9 @@
+ --surface:#fff;
+ --ink:#1d2d44;
+ --muted:#5b6c83;
+---accent:#285db5;
+---soft:#e5edfa;
++--seed:#285db5;
++--accent:var(--seed);
++--soft:color-mix(in srgb,var(--seed) 10%,var(--surface));
+ --line:#ccd8e8;
+ --shadow:0 12px 42px #263e6610;
+ --error:#a62938;
+@@ -17,7 +18,7 @@
+ --ink:#e5edf8;
+ --muted:#a9b9ce;
+ --accent:#9bbfff;
+---soft:#2b3e59;
++--soft:color-mix(in srgb,var(--seed) 18%,var(--surface));
+ --line:#41536d;
+ --shadow:0 12px 42px #0002;
+ --error:#ffabb5;}}
+@@ -28,7 +29,7 @@
+ --ink:#e5edf8;
+ --muted:#a9b9ce;
+ --accent:#9bbfff;
+---soft:#2b3e59;
++--soft:color-mix(in srgb,var(--seed) 18%,var(--surface));
+ --line:#41536d;
+ --shadow:0 12px 42px #0002;
+ --error:#ffabb5;}
+@@ -36,6 +37,7 @@
+ *{box-sizing:border-box;}
+ 
+ body{margin:0;
++background:var(--bg);
+ min-height:100vh;}
+ 
+ button,
+@@ -322,6 +324,106 @@
+ line-height:1.5;}
+ 
+ [hidden]{display:none!important;}
++
++/* Local color, without images or network requests. */
++:root[data-palette='forest'] { --seed:#276b54; }
++
++:root[data-palette='clay'] { --seed:#a34b35; }
++
++:root[data-palette='violet'] { --seed:#7151a5; }
++
++:root[data-palette='slate'] { --seed:#526578; }
++
++:root[data-theme='dark'] { --accent:color-mix(in srgb,var(--seed) 45%,white); }
++@media (prefers-color-scheme: dark) {
++  :root:not([data-theme='light']) { --accent:color-mix(in srgb,var(--seed) 45%,white); }
++}
++
++:root[data-background='mist'] body {
++  background:radial-gradient(ellipse at 12% 8%,color-mix(in srgb,var(--seed) 14%,transparent),transparent 58%),var(--bg);
++}
++
++:root[data-background='lines'] body {
++  background:repeating-linear-gradient(125deg,transparent 0 58px,color-mix(in srgb,var(--seed) 6%,transparent) 59px 60px),var(--bg);
++}
++
++:root[data-layout='compact'] .links { grid-template-columns:repeat(3,minmax(0,1fr));
++ gap:8px; }
++
++:root[data-layout='compact'] .site a { flex-direction:row;
++ min-height:64px;
++ padding:10px 24px 10px 8px; }
++
++:root[data-layout='compact'] .monogram { flex-shrink:0;
++ width:34px;
++ height:34px;
++ border-radius:10px;
++ font-size:14px; }
++
++#settings-dialog { position:fixed;
++ max-width:none;
++ inset:12px 12px 12px auto;
++ margin:0;
++  width:min(380px,calc(100% - 24px));
++ height:calc(100% - 24px);
++ max-height:none;
++  padding:26px;
++ overflow:auto;
++ border-radius:18px; }
++
++#settings-dialog::backdrop { background:#0b1a3422;
++ backdrop-filter:none; }
++
++#settings-dialog h3 { font-size:12px;
++ font-weight:600;
++ text-transform:uppercase;
++  letter-spacing:1.2px;
++ color:var(--muted);
++ margin:24px 0 0;
++ padding-top:16px;
++ border-top:1px solid var(--line); }
++
++#settings-dialog label { margin-top:14px; }
++
++#settings-dialog select { padding:9px 12px; }
++
++#settings-dialog .dialog-copy { margin-bottom:12px; }
++
++.palette-sample { display:flex;
++ height:30px;
++ border-radius:8px;
++ overflow:hidden;
++ margin-top:10px; }
++
++.palette-sample span { flex:1;
++ background:var(--seed); }
++
++.palette-sample span:nth-child(2) { background:var(--soft); }
++
++.palette-sample span:nth-child(3) { background:var(--bg);
++ border:1px solid var(--line);
++ border-radius:0 8px 8px 0; }
++
++#settings-dialog .check-label { display:flex;
++ align-items:center;
++ gap:10px; }
++
++#show-links { width:17px;
++ height:17px;
++ accent-color:var(--seed); }
++
++#settings-dialog .dialog-actions { position:sticky;
++ bottom:-26px;
++ padding:16px 0;
++  background:var(--surface);
++ border-top:1px solid var(--line); }
++@media(max-width: 520px) {
++  :root[data-layout='compact'] .links { grid-template-columns:repeat(2,minmax(0,1fr)); }
++  #settings-dialog { inset:0;
++ width:100%;
++ height:100%;
++ border-radius:0; }
++}
+ 
+ .sr-only{position:absolute;
+ width:1px;
+diff --git a/chrome/browser/resources/new_tab_page/senda_home.ts b/chrome/browser/resources/new_tab_page/senda_home.ts
+--- a/chrome/browser/resources/new_tab_page/senda_home.ts
++++ b/chrome/browser/resources/new_tab_page/senda_home.ts
+@@ -1,5 +1,16 @@
+ // Copyright 2026 Senda contributors. All rights reserved.
+-import {normalizeUrl, normalizeState, searchUrl, readState, writeState} from './senda_home_state.js';
++import {normalizeUrl, normalizeState, searchUrl, readState, writeState, STORAGE_KEY, editedLinkIndex} from './senda_home_state.js';
++import type {Preferences} from './senda_home_state.js';
++
++interface Appearance {scheme: number; palette: number; editable: boolean;}
++interface NativeAppearance {
++  getSendaAppearance(): Promise<Appearance>;
++  setSendaAppearance(scheme: number, palette: number): Promise<{accepted: boolean}>;
++}
++const palettes = ['blue','forest','clay','violet','slate'] as const;
++let native: NativeAppearance|undefined;
++let nativeReady = location.protocol !== 'chrome:';
++let appearance: Appearance|undefined;
+ function $(id: string): HTMLElement {
+   const element = document.getElementById(id);
+   if (!element) throw Error('Missing Senda element: ' + id);
+@@ -51,8 +62,16 @@
+   const target = targets[index] || button('add-link');
+   if (!target.disabled) target.focus();
+ }
++function renderAppearance(value: Preferences) {
++  const root = document.documentElement;
++  root.dataset['theme'] = value.theme;
++  root.dataset['palette'] = value.palette;
++  root.dataset['background'] = value.background;
++  root.dataset['layout'] = value.layout;
++  $('sites').hidden = !value.showLinks;
++}
+ function render() {
+-  document.documentElement.dataset['theme'] = state.theme;
++  renderAppearance(state);
+   $('engine-name').textContent = names[state.engine];
+   $('empty').hidden = state.links.length > 0;
+   button('add-link').disabled = state.links.length >= 12;
+@@ -74,13 +93,48 @@
+   const url = searchUrl(input('search').value, state.engine);
+   if (url) window.location.assign(url);
+ });
+-$('customize').addEventListener('click', () => {
+-  select('theme').value = state.theme; select('engine').value = state.engine;
++function settingsValue(): Preferences {
++  return normalizeState({...state, theme: select('theme').value, engine: select('engine').value,
++    palette: select('palette').value, background: select('background').value,
++    layout: select('layout').value, showLinks: input('show-links').checked});
++}
++async function readAppearance() {
++  if (!native) return;
++  appearance = await native.getSendaAppearance();
++  state = normalizeState({...state, theme: ['system','light','dark'][appearance.scheme],
++    palette: palettes[appearance.palette] || 'custom'});
++  render();
++}
++$('customize').addEventListener('click', async () => {
++  try { await readAppearance(); }
++  catch { report('No se pudo consultar la apariencia del navegador. Vuelve a intentarlo.'); return; }
++  for (const key of ['theme','engine','palette','background','layout'] as const) select(key).value = state[key];
++  const currentOption = select('palette').querySelector<HTMLOptionElement>('option[value="custom"]')!;
++  currentOption.hidden = currentOption.disabled = state.palette !== 'custom';
++  input('show-links').checked = state.showLinks;
++  select('theme').disabled = select('palette').disabled = !nativeReady || appearance?.editable === false;
+   dialog('settings-dialog').showModal();
+ });
+-$('settings-form').addEventListener('submit', event => {
+-  event.preventDefault(); state = normalizeState({...state, theme: select('theme').value, engine: select('engine').value});
++$('settings-form').addEventListener('input', () => renderAppearance(settingsValue()));
++dialog('settings-dialog').addEventListener('close', () => renderAppearance(state));
++$('settings-form').addEventListener('submit', async event => {
++  event.preventDefault();
++  const next = settingsValue();
++  const save = document.querySelector<HTMLButtonElement>('#settings-form button[type="submit"]')!;
++  save.disabled = true;
++  try {
++    const scheme = ['system','light','dark'].indexOf(next.theme);
++    const palette = palettes.indexOf(next.palette as typeof palettes[number]);
++    if (native && (scheme !== appearance?.scheme || palette !== appearance?.palette)) {
++      if (!(await native.setSendaAppearance(scheme, palette)).accepted) {
++        report('La apariencia está administrada. No se aplicaron los cambios.'); return;
++      }
++      appearance = await native.getSendaAppearance();
++    }
++    state = next;
+   render(); persist('Preferencias guardadas.'); dialog('settings-dialog').close();
++  } catch { report('No se pudo aplicar la apariencia. Vuelve a intentarlo.'); }
++  finally { save.disabled = false; }
+ });
+ $('add-link').addEventListener('click', () => openLink());
+ $('link-form').addEventListener('submit', event => {
+@@ -106,4 +160,28 @@
+   close.addEventListener('click', () => { const id = close.dataset['close']; if (id) dialog(id).close(); });
+ }
+ render();
++window.addEventListener('storage', event => {
++  if (event.key !== STORAGE_KEY && event.key !== null) return;
++  const next = readState(storage).state;
++  if (dialog('link-dialog').open && editing >= 0) {
++    editing = editedLinkIndex(state, next, editing);
++    if (editing < 0) {
++      dialog('link-dialog').close();
++      report('Este acceso se cambió o eliminó en otra pestaña. Puedes volver a abrirlo.');
++    }
++  }
++  state = next;
++  if (!dialog('settings-dialog').open) render();
++});
++if (location.protocol === 'chrome:') {
++  // The preview has no native dependencies. Chromium compiles this adapter separately.
++  const adapter = './senda_appearance.js';
++  import(adapter).then(async module => {
++    native = module.getAppearanceHandler() as NativeAppearance;
++    await readAppearance(); nativeReady = true;
++    if (appearance?.editable === false) $('appearance-note').textContent = 'La apariencia está administrada por tu organización.';
++  }).catch(() => report('La apariencia del navegador no está disponible. Puedes personalizar el inicio.'));
++} else {
++  $('appearance-note').textContent = 'Vista previa: estos colores solo afectan a esta página.';
++}
+ if (loaded.error) report('No se pudieron recuperar las preferencias. Si modificas esta página, intentaremos guardarlas de nuevo.');
+diff --git a/chrome/browser/resources/new_tab_page/senda_home_state.ts b/chrome/browser/resources/new_tab_page/senda_home_state.ts
+--- a/chrome/browser/resources/new_tab_page/senda_home_state.ts
++++ b/chrome/browser/resources/new_tab_page/senda_home_state.ts
+@@ -1,9 +1,17 @@
+ // Copyright 2026 Senda contributors. All rights reserved.
+ export type Theme = 'system'|'light'|'dark';
+ export type Engine = 'duckduckgo'|'google'|'bing';
++export type Palette = 'blue'|'forest'|'clay'|'violet'|'slate'|'custom';
+ export interface Site {title: string; url: string;}
+-export interface Preferences {theme: Theme; engine: Engine; links: Site[];}
++export interface Preferences {
++  theme: Theme; engine: Engine; links: Site[]; palette: Palette;
++  background: 'plain'|'mist'|'lines'; layout: 'comfortable'|'compact'; showLinks: boolean;
++}
+ export const STORAGE_KEY = 'senda.home.v1';
++export function editedLinkIndex(before: Preferences, after: Preferences, index: number): number {
++  const url = before.links[index]?.url;
++  return url ? after.links.findIndex(link => link.url === url) : -1;
++}
+ export function normalizeUrl(value: unknown): string|null {
+   if (typeof value !== 'string' || !value.trim()) return null;
+   let text = value.trim();
+@@ -19,6 +27,10 @@
+   const state: Preferences = {
+     theme: input.theme === 'dark' || input.theme === 'light' ? input.theme : 'system',
+     engine: input.engine === 'google' || input.engine === 'bing' ? input.engine : 'duckduckgo',
++    palette: ['forest','clay','violet','slate','custom'].includes(input.palette || '') ? input.palette! : 'blue',
++    background: input.background === 'plain' || input.background === 'lines' ? input.background : 'mist',
++    layout: input.layout === 'compact' ? 'compact' : 'comfortable',
++    showLinks: input.showLinks !== false,
+     links: [],
+   };
+   if (Array.isArray(input.links)) {
+diff --git a/chrome/browser/resources/new_tab_page/senda_appearance.ts b/chrome/browser/resources/new_tab_page/senda_appearance.ts
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/resources/new_tab_page/senda_appearance.ts
+@@ -0,0 +1,7 @@
++// Copyright 2026 Senda contributors. All rights reserved.
++// Native-only adapter; the standalone preview never imports this module.
++import {NewTabPageProxy} from './new_tab_page_proxy.js';
++
++export function getAppearanceHandler() {
++  return NewTabPageProxy.getInstance().handler;
++}
+diff --git a/chrome/browser/resources/new_tab_page/BUILD.gn b/chrome/browser/resources/new_tab_page/BUILD.gn
+--- a/chrome/browser/resources/new_tab_page/BUILD.gn
++++ b/chrome/browser/resources/new_tab_page/BUILD.gn
+@@ -47,7 +47,7 @@
+   }
+ 
+   web_component_files = all_web_component_files
+-  ts_files = all_ts_files + [ "senda_home.ts", "senda_home_state.ts" ]
++  ts_files = all_ts_files + [ "senda_home.ts", "senda_home_state.ts", "senda_appearance.ts" ]
+   css_files = all_css_files
+ 
+   mojo_files_deps = [
+@@ -132,6 +132,7 @@
+       "new_tab_page.js",
+       "lazy_load.js",
+       "senda_home.js",
++      "senda_appearance.js",
+     ]
+     optimize_webui_excludes = [
+       "chrome://resources/cr_components/color_change_listener/color_change_listener.mojom-webui.js",
+diff --git a/chrome/browser/ui/webui/new_tab_page/new_tab_page.mojom b/chrome/browser/ui/webui/new_tab_page/new_tab_page.mojom
+--- a/chrome/browser/ui/webui/new_tab_page/new_tab_page.mojom
++++ b/chrome/browser/ui/webui/new_tab_page/new_tab_page.mojom
+@@ -166,6 +166,10 @@
+ 
+ // Browser-side handler for requests from WebUI page.
+ interface PageHandler {
++  // Senda's narrow native appearance bridge. palette -1 preserves current color.
++  GetSendaAppearance() => (int32 scheme, int32 palette, bool editable);
++  SetSendaAppearance(int32 scheme, int32 palette) => (bool accepted);
++
+   // Sets the visibility of NTP tiles and the shortcuts type.
+   SetMostVisitedSettings(ntp_tiles.mojom.TileType shortcuts_type,
+     bool shortcuts_visible);
+diff --git a/chrome/browser/ui/webui/new_tab_page/new_tab_page_handler.h b/chrome/browser/ui/webui/new_tab_page/new_tab_page_handler.h
+--- a/chrome/browser/ui/webui/new_tab_page/new_tab_page_handler.h
++++ b/chrome/browser/ui/webui/new_tab_page/new_tab_page_handler.h
+@@ -124,6 +124,9 @@
+           child_untrusted_document_remote);
+ 
+   // new_tab_page::mojom::PageHandler:
++  void GetSendaAppearance(GetSendaAppearanceCallback callback) override;
++  void SetSendaAppearance(int32_t scheme, int32_t palette,
++                          SetSendaAppearanceCallback callback) override;
+   void SetMostVisitedSettings(ntp_tiles::TileType type, bool visible) override;
+   void GetMostVisitedSettings(GetMostVisitedSettingsCallback callback) override;
+   void GetDoodle(GetDoodleCallback callback) override;
+diff --git a/chrome/browser/ui/webui/new_tab_page/new_tab_page_handler.cc b/chrome/browser/ui/webui/new_tab_page/new_tab_page_handler.cc
+--- a/chrome/browser/ui/webui/new_tab_page/new_tab_page_handler.cc
++++ b/chrome/browser/ui/webui/new_tab_page/new_tab_page_handler.cc
+@@ -5,6 +5,7 @@
+ #include "chrome/browser/ui/webui/new_tab_page/new_tab_page_handler.h"
+ 
+ #include <algorithm>
++#include <array>
+ #include <iterator>
+ #include <memory>
+ #include <optional>
+@@ -588,6 +589,56 @@
+ #endif  // !BUILDFLAG(IS_ANDROID)
+ }
+ 
++namespace {
++constexpr std::array<SkColor, 5> kSendaColors = {
++    SkColorSetRGB(40, 93, 181), SkColorSetRGB(39, 107, 84),
++    SkColorSetRGB(163, 75, 53), SkColorSetRGB(113, 81, 165),
++    SkColorSetRGB(82, 101, 120)};
++}  // namespace
++
++void NewTabPageHandler::GetSendaAppearance(
++    GetSendaAppearanceCallback callback) {
++  int32_t palette = -1;
++  const auto color = theme_service_->GetUserColor();
++  if (color && !theme_service_->UsingExtensionTheme() &&
++      !theme_service_->UsingDeviceTheme() && !theme_service_->GetIsGrayscale()) {
++    for (int32_t i = 0; i < 5; ++i) {
++      if (*color == kSendaColors[i]) {
++        palette = i;
++        break;
++      }
++    }
++  }
++  const bool editable = !theme_service_->UsingPolicyTheme() &&
++      !profile_->GetPrefs()->IsManagedPreference(prefs::kBrowserColorScheme) &&
++      !profile_->GetPrefs()->IsManagedPreference(prefs::kUserColor);
++  std::move(callback).Run(
++      static_cast<int32_t>(theme_service_->GetBrowserColorScheme()), palette,
++      editable);
++}
++
++void NewTabPageHandler::SetSendaAppearance(
++    int32_t scheme, int32_t palette, SetSendaAppearanceCallback callback) {
++  if (scheme < 0 || scheme > 2 || palette < -1 || palette > 4 ||
++      theme_service_->UsingPolicyTheme() ||
++      profile_->GetPrefs()->IsManagedPreference(prefs::kBrowserColorScheme) ||
++      profile_->GetPrefs()->IsManagedPreference(prefs::kUserColor)) {
++    std::move(callback).Run(false);
++    return;
++  }
++  if (palette >= 0) {
++    theme_service_->UseDeviceTheme(false);
++  }
++  if (palette >= 0 &&
++      (theme_service_->GetUserColor() != kSendaColors[palette] ||
++       theme_service_->UsingExtensionTheme() || theme_service_->GetIsGrayscale())) {
++    theme_service_->SetUserColor(kSendaColors[palette]);
++  }
++  theme_service_->SetBrowserColorScheme(
++      static_cast<ThemeService::BrowserColorScheme>(scheme));
++  std::move(callback).Run(true);
++}
++
+ void NewTabPageHandler::SetMostVisitedSettings(ntp_tiles::TileType type,
+                                                bool visible) {
+   bool old_visible = IsShortcutsVisible();

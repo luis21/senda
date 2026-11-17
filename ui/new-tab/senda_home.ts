@@ -1,5 +1,16 @@
 // Copyright 2026 Senda contributors. All rights reserved.
-import {normalizeUrl, normalizeState, searchUrl, readState, writeState} from './senda_home_state.js';
+import {normalizeUrl, normalizeState, searchUrl, readState, writeState, STORAGE_KEY, editedLinkIndex} from './senda_home_state.js';
+import type {Preferences} from './senda_home_state.js';
+
+interface Appearance {scheme: number; palette: number; editable: boolean;}
+interface NativeAppearance {
+  getSendaAppearance(): Promise<Appearance>;
+  setSendaAppearance(scheme: number, palette: number): Promise<{accepted: boolean}>;
+}
+const palettes = ['blue','forest','clay','violet','slate'] as const;
+let native: NativeAppearance|undefined;
+let nativeReady = location.protocol !== 'chrome:';
+let appearance: Appearance|undefined;
 function $(id: string): HTMLElement {
   const element = document.getElementById(id);
   if (!element) throw Error('Missing Senda element: ' + id);
@@ -51,8 +62,16 @@ function focusLink(index: number) {
   const target = targets[index] || button('add-link');
   if (!target.disabled) target.focus();
 }
+function renderAppearance(value: Preferences) {
+  const root = document.documentElement;
+  root.dataset['theme'] = value.theme;
+  root.dataset['palette'] = value.palette;
+  root.dataset['background'] = value.background;
+  root.dataset['layout'] = value.layout;
+  $('sites').hidden = !value.showLinks;
+}
 function render() {
-  document.documentElement.dataset['theme'] = state.theme;
+  renderAppearance(state);
   $('engine-name').textContent = names[state.engine];
   $('empty').hidden = state.links.length > 0;
   button('add-link').disabled = state.links.length >= 12;
@@ -74,13 +93,48 @@ $('search-form').addEventListener('submit', event => {
   const url = searchUrl(input('search').value, state.engine);
   if (url) window.location.assign(url);
 });
-$('customize').addEventListener('click', () => {
-  select('theme').value = state.theme; select('engine').value = state.engine;
+function settingsValue(): Preferences {
+  return normalizeState({...state, theme: select('theme').value, engine: select('engine').value,
+    palette: select('palette').value, background: select('background').value,
+    layout: select('layout').value, showLinks: input('show-links').checked});
+}
+async function readAppearance() {
+  if (!native) return;
+  appearance = await native.getSendaAppearance();
+  state = normalizeState({...state, theme: ['system','light','dark'][appearance.scheme],
+    palette: palettes[appearance.palette] || 'custom'});
+  render();
+}
+$('customize').addEventListener('click', async () => {
+  try { await readAppearance(); }
+  catch { report('No se pudo consultar la apariencia del navegador. Vuelve a intentarlo.'); return; }
+  for (const key of ['theme','engine','palette','background','layout'] as const) select(key).value = state[key];
+  const currentOption = select('palette').querySelector<HTMLOptionElement>('option[value="custom"]')!;
+  currentOption.hidden = currentOption.disabled = state.palette !== 'custom';
+  input('show-links').checked = state.showLinks;
+  select('theme').disabled = select('palette').disabled = !nativeReady || appearance?.editable === false;
   dialog('settings-dialog').showModal();
 });
-$('settings-form').addEventListener('submit', event => {
-  event.preventDefault(); state = normalizeState({...state, theme: select('theme').value, engine: select('engine').value});
+$('settings-form').addEventListener('input', () => renderAppearance(settingsValue()));
+dialog('settings-dialog').addEventListener('close', () => renderAppearance(state));
+$('settings-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const next = settingsValue();
+  const save = document.querySelector<HTMLButtonElement>('#settings-form button[type="submit"]')!;
+  save.disabled = true;
+  try {
+    const scheme = ['system','light','dark'].indexOf(next.theme);
+    const palette = palettes.indexOf(next.palette as typeof palettes[number]);
+    if (native && (scheme !== appearance?.scheme || palette !== appearance?.palette)) {
+      if (!(await native.setSendaAppearance(scheme, palette)).accepted) {
+        report('La apariencia está administrada. No se aplicaron los cambios.'); return;
+      }
+      appearance = await native.getSendaAppearance();
+    }
+    state = next;
   render(); persist('Preferencias guardadas.'); dialog('settings-dialog').close();
+  } catch { report('No se pudo aplicar la apariencia. Vuelve a intentarlo.'); }
+  finally { save.disabled = false; }
 });
 $('add-link').addEventListener('click', () => openLink());
 $('link-form').addEventListener('submit', event => {
@@ -106,4 +160,28 @@ for (const close of document.querySelectorAll<HTMLButtonElement>('[data-close]')
   close.addEventListener('click', () => { const id = close.dataset['close']; if (id) dialog(id).close(); });
 }
 render();
+window.addEventListener('storage', event => {
+  if (event.key !== STORAGE_KEY && event.key !== null) return;
+  const next = readState(storage).state;
+  if (dialog('link-dialog').open && editing >= 0) {
+    editing = editedLinkIndex(state, next, editing);
+    if (editing < 0) {
+      dialog('link-dialog').close();
+      report('Este acceso se cambió o eliminó en otra pestaña. Puedes volver a abrirlo.');
+    }
+  }
+  state = next;
+  if (!dialog('settings-dialog').open) render();
+});
+if (location.protocol === 'chrome:') {
+  // The preview has no native dependencies. Chromium compiles this adapter separately.
+  const adapter = './senda_appearance.js';
+  import(adapter).then(async module => {
+    native = module.getAppearanceHandler() as NativeAppearance;
+    await readAppearance(); nativeReady = true;
+    if (appearance?.editable === false) $('appearance-note').textContent = 'La apariencia está administrada por tu organización.';
+  }).catch(() => report('La apariencia del navegador no está disponible. Puedes personalizar el inicio.'));
+} else {
+  $('appearance-note').textContent = 'Vista previa: estos colores solo afectan a esta página.';
+}
 if (loaded.error) report('No se pudieron recuperar las preferencias. Si modificas esta página, intentaremos guardarlas de nuevo.');

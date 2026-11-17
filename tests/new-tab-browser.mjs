@@ -44,7 +44,10 @@ try {
   await evaluate('localStorage.clear()');
   await cdp.send('Page.reload',{},session);
   await waitForHome();
-  await evaluate('document.querySelector("#customize").click();document.querySelector("#theme").value="light";document.querySelector("#settings-form").requestSubmit()');
+  await evaluate('document.querySelector("#customize").click()');
+  await evaluate('new Promise(resolve=>{const timer=setInterval(()=>{if(document.querySelector("#settings-dialog").open){clearInterval(timer);resolve(true)}},50)})');
+  await evaluate('document.querySelector("#theme").value="light";document.querySelector("#settings-form").requestSubmit()');
+  await evaluate('new Promise(resolve=>{const timer=setInterval(()=>{if(!document.querySelector("#settings-dialog").open){clearInterval(timer);resolve(true)}},50)})');
   await screenshot(`docs/validation/${artifact}-light.png`,1440,1000);
   await evaluate('document.querySelector("#add-link").click();document.querySelector("#link-title").value="Ejemplo";document.querySelector("#link-url").value="javascript:alert(1)";document.querySelector("#link-form").requestSubmit()');
   assert.equal(await evaluate('document.querySelector("#link-dialog").open'),true);
@@ -66,7 +69,10 @@ try {
   assert.equal(await evaluate('document.activeElement.getAttribute("aria-label")'),'Editar Sitio 12');
   console.log('PASS: twelve shortcuts retain keyboard focus.');
   await evaluate('for(let i=0;i<12;i++){document.querySelector(".edit").click();document.querySelector("#remove-link").click()}');
-  await evaluate('document.querySelector("#customize").click();document.querySelector("#theme").value="dark";document.querySelector("#settings-form").requestSubmit()');
+  await evaluate('document.querySelector("#customize").click()');
+  await evaluate('new Promise(resolve=>{const timer=setInterval(()=>{if(document.querySelector("#settings-dialog").open){clearInterval(timer);resolve(true)}},50)})');
+  await evaluate('document.querySelector("#theme").value="dark";document.querySelector("#settings-form").requestSubmit()');
+  await evaluate('new Promise(resolve=>{const timer=setInterval(()=>{if(!document.querySelector("#settings-dialog").open){clearInterval(timer);resolve(true)}},50)})');
   await screenshot(`docs/validation/${artifact}-dark.png`,1440,1000);
   await screenshot(`docs/validation/${artifact}-mobile.png`,390,844);
   assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);

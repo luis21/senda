@@ -6,7 +6,7 @@ import {fileURLToPath} from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 execFileSync(process.execPath, [root+'.chromium/src/third_party/node/node_modules/typescript/bin/tsc', '--target','ESNext','--module','ESNext','--moduleResolution','bundler','--lib','DOM,DOM.Iterable,ESNext','--strict','--noUncheckedIndexedAccess','--noPropertyAccessFromIndexSignature','--skipLibCheck','--outDir',root+'.tools/home-tests',root+'ui/new-tab/senda_home.ts',root+'ui/new-tab/senda_home_state.ts']);
 const source = await readFile(new URL('../.tools/home-tests/senda_home_state.js', import.meta.url), 'utf8');
-const {normalizeUrl, normalizeState, searchUrl, readState, writeState} = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
+const {normalizeUrl, normalizeState, searchUrl, readState, writeState, editedLinkIndex} = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
 
 test('rechaza protocolos ejecutables y conserva HTTPS', () => {
   assert.equal(normalizeUrl('javascript:alert(1)'), null);
@@ -39,4 +39,36 @@ test('guarda preferencias normalizadas y recupera accesos', () => {
   assert.equal(writeState(storage,{theme:'dark',engine:'bing',links:[{title:'Example',url:'https://example.com'}]}),true);
   assert.equal(readState(storage).state.theme,'dark');
   assert.equal(readState(storage).state.links[0].url,'https://example.com/');
+});
+
+test('migra perfiles anteriores sin perder accesos y limita la personalización', () => {
+  const old = normalizeState({theme:'dark', links:[{title:'Sitio',url:'https://example.com'}]});
+  assert.equal(old.palette, 'blue');
+  assert.equal(old.background, 'mist');
+  assert.equal(old.layout, 'comfortable');
+  assert.equal(old.showLinks, true);
+  assert.equal(old.links.length, 1);
+  const invalid = normalizeState({palette:'__proto__',background:'url(https://evil)',layout:'bad',showLinks:'false'});
+  assert.equal(invalid.palette, 'blue');
+  assert.equal(invalid.background, 'mist');
+  assert.equal(invalid.showLinks, true);
+});
+
+test('conserva opciones de personalización válidas al guardar', () => {
+  let saved;
+  const storage = {setItem:(_,v)=>saved=v,getItem:()=>saved};
+  writeState(storage,{palette:'forest',background:'lines',layout:'compact',showLinks:false});
+  const value = readState(storage).state;
+  assert.equal(value.palette,'forest');
+  assert.equal(value.background,'lines');
+  assert.equal(value.layout,'compact');
+  assert.equal(value.showLinks,false);
+});
+
+test('conserva la identidad del acceso editado si otra pestaña elimina uno anterior', () => {
+  const before=normalizeState({links:['a','b','c'].map(x=>({title:x,url:`https://${x}.example`}))});
+  const after=normalizeState({links:before.links.slice(1)});
+  assert.equal(editedLinkIndex(before,after,1),0);
+  assert.equal(editedLinkIndex(before,after,0),-1);
+  assert.equal(editedLinkIndex(before,after,-1),-1);
 });

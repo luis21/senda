@@ -1,9 +1,17 @@
 // Copyright 2026 Senda contributors. All rights reserved.
 export type Theme = 'system'|'light'|'dark';
 export type Engine = 'duckduckgo'|'google'|'bing';
+export type Palette = 'blue'|'forest'|'clay'|'violet'|'slate'|'custom';
 export interface Site {title: string; url: string;}
-export interface Preferences {theme: Theme; engine: Engine; links: Site[];}
+export interface Preferences {
+  theme: Theme; engine: Engine; links: Site[]; palette: Palette;
+  background: 'plain'|'mist'|'lines'; layout: 'comfortable'|'compact'; showLinks: boolean;
+}
 export const STORAGE_KEY = 'senda.home.v1';
+export function editedLinkIndex(before: Preferences, after: Preferences, index: number): number {
+  const url = before.links[index]?.url;
+  return url ? after.links.findIndex(link => link.url === url) : -1;
+}
 export function normalizeUrl(value: unknown): string|null {
   if (typeof value !== 'string' || !value.trim()) return null;
   let text = value.trim();
@@ -19,6 +27,10 @@ export function normalizeState(value: unknown): Preferences {
   const state: Preferences = {
     theme: input.theme === 'dark' || input.theme === 'light' ? input.theme : 'system',
     engine: input.engine === 'google' || input.engine === 'bing' ? input.engine : 'duckduckgo',
+    palette: ['forest','clay','violet','slate','custom'].includes(input.palette || '') ? input.palette! : 'blue',
+    background: input.background === 'plain' || input.background === 'lines' ? input.background : 'mist',
+    layout: input.layout === 'compact' ? 'compact' : 'comfortable',
+    showLinks: input.showLinks !== false,
     links: [],
   };
   if (Array.isArray(input.links)) {

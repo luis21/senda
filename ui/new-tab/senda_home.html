@@ -31,7 +31,7 @@
       </form>
       <p class="engine-note">Buscar con <span id="engine-name">DuckDuckGo</span></p>
     </section>
-    <section class="sites" aria-labelledby="sites-heading">
+    <section id="sites" class="sites" aria-labelledby="sites-heading">
       <div class="section-heading"><h2 id="sites-heading">Tus sitios</h2><button id="add-link" class="text-button" type="button" aria-haspopup="dialog">+ Añadir acceso</button></div>
       <div id="links" class="links"></div>
       <div id="empty" class="empty"><span class="empty-symbol" aria-hidden="true">↗</span><p>Lo que visitas, más cerca.</p><span>Añade tus sitios favoritos para tenerlos a mano.</span></div>
@@ -41,8 +41,16 @@
   <dialog id="settings-dialog" aria-labelledby="settings-heading">
     <form id="settings-form">
       <div class="dialog-heading"><h2 id="settings-heading">A tu manera</h2><button class="close text-button" type="button" data-close="settings-dialog" aria-label="Cerrar personalización">×</button></div>
-      <p class="dialog-copy">Un espacio cómodo para empezar.</p>
+      <p class="dialog-copy">Elige cómo se siente tu Senda.</p>
+      <h3>Barra y pestañas</h3>
       <label for="theme">Apariencia</label><select id="theme"><option value="system">Seguir el sistema</option><option value="light">Claro</option><option value="dark">Oscuro</option></select>
+      <label for="palette">Color de Senda</label><select id="palette"><option value="custom">Tema actual</option><option value="blue">Azul · horizonte</option><option value="forest">Verde · bosque</option><option value="clay">Terracota · arcilla</option><option value="violet">Violeta · atardecer</option><option value="slate">Gris · pizarra</option></select>
+      <div class="palette-sample" aria-hidden="true"><span></span><span></span><span></span></div>
+      <p id="appearance-note" class="field-note">El color y la apariencia se aplican a la barra y las pestañas al guardar.</p>
+      <h3>Página de inicio</h3>
+      <label for="background">Fondo</label><select id="background"><option value="plain">Liso</option><option value="mist">Bruma de color</option><option value="lines">Líneas suaves</option></select>
+      <label for="layout">Distribución de accesos</label><select id="layout"><option value="comfortable">Cómoda</option><option value="compact">Compacta</option></select>
+      <label class="check-label"><input id="show-links" type="checkbox"> Mostrar mis sitios</label>
       <label for="engine">Buscador de esta página</label><select id="engine"><option value="duckduckgo">DuckDuckGo</option><option value="google">Google</option><option value="bing">Bing</option></select>
       <p class="field-note">Tus preferencias se guardan en este perfil.</p>
       <div class="dialog-actions"><button type="button" class="secondary" data-close="settings-dialog">Cancelar</button><button type="submit" class="primary">Guardar</button></div>
