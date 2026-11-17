@@ -13,7 +13,7 @@ export async function connect(port, endpoint) {
     });
     req.on('error',reject); req.end();
   });
-  const pending = new Map();
+  const pending = new Map(), watches = new Set();
   let buffer = Buffer.alloc(0), seq = 0;
   const failAll = error => { for (const item of pending.values()) { clearTimeout(item.timer); item.reject(error); } pending.clear(); };
   socket.on('error',failAll);
@@ -30,9 +30,17 @@ export async function connect(port, endpoint) {
       if(op!==1)continue;
       const message=JSON.parse(payload.toString()), item=pending.get(message.id);
       if(item){clearTimeout(item.timer);pending.delete(message.id);message.error?item.reject(Error(JSON.stringify(message.error))):item.resolve(message.result);}
+      else if(message.method)for(const watch of watches){
+        if(message.method!==watch.method||message.sessionId!==watch.sessionId)continue;
+        watch.events.push(message.params);if(watch.events.length>200)watch.events.shift();
+      }
     }
   });
   return {
+    watch(method,sessionId){
+      const entry={method,sessionId,events:[]};watches.add(entry);
+      return {events:entry.events,stop:()=>watches.delete(entry)};
+    },
     send(method,params={},sessionId) {
       return new Promise((resolve,reject)=>{
         const id=++seq, data=Buffer.from(JSON.stringify({id,method,params,...(sessionId?{sessionId}:{})}));
@@ -45,6 +53,6 @@ export async function connect(port, endpoint) {
         socket.write(Buffer.concat([header,mask,data]));
       });
     },
-    close(){socket.destroy();},
+    close(){watches.clear();socket.destroy();},
   };
 }

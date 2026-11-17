@@ -1,0 +1,241 @@
+{
+  "revision": "fb096c0011f9d50f0a264a9376420cdea9c421e3",
+  "browserVersion": "156.0.8078.80",
+  "nativePatchCount": 10,
+  "nodeTests": {
+    "passed": 16,
+    "failed": 0
+  },
+  "store": {
+    "status": "PASS",
+    "startedUtc": "2026-11-17T21:19:36.443Z",
+    "completedUtc": "2026-11-17T21:20:09.216Z",
+    "installed": {
+      "ddkjiahejlhfcafbddmgiahcphecmpfh": {
+        "name": "uBlock Origin Lite",
+        "version": "2026.1116.1650",
+        "manifestVersion": 3,
+        "fromWebstore": true
+      },
+      "eimadpbcbfnmbkopoojfekhnkhdbieeh": {
+        "name": "Dark Reader",
+        "version": "4.9.135",
+        "manifestVersion": 3,
+        "fromWebstore": true
+      }
+    },
+    "enabledRulesets": [
+      "easylist",
+      "easyprivacy",
+      "pgl",
+      "spa-0",
+      "spa-1",
+      "ublock-badware",
+      "ublock-filters",
+      "urlhaus-full"
+    ],
+    "stages": [
+      {
+        "name": "store extension blocks with native site exception",
+        "status": "PASS",
+        "adReachedServer": false,
+        "legitimateContent": "PASS"
+      },
+      {
+        "name": "without either blocker the ad reaches the server",
+        "status": "PASS",
+        "adReachedServer": true,
+        "legitimateContent": "PASS"
+      },
+      {
+        "name": "reenabling the store extension restores blocking",
+        "status": "PASS",
+        "adReachedServer": false,
+        "legitimateContent": "PASS"
+      },
+      {
+        "name": "declarative filtering after stopping the extension worker",
+        "status": "PASS",
+        "adReachedServer": false,
+        "legitimateContent": "PASS"
+      },
+      {
+        "name": "Dark Reader disabled control",
+        "status": "PASS",
+        "adReachedServer": false,
+        "legitimateContent": "PASS"
+      },
+      {
+        "name": "Dark Reader enabled control",
+        "status": "PASS",
+        "adReachedServer": false,
+        "legitimateContent": "PASS"
+      },
+      {
+        "name": "both blockers after browser restart",
+        "status": "PASS",
+        "adReachedServer": false,
+        "legitimateContent": "PASS"
+      },
+      {
+        "name": "native blocking remains active without uBOL",
+        "status": "PASS",
+        "adReachedServer": false,
+        "legitimateContent": "PASS"
+      }
+    ],
+    "workerLifecycle": {
+      "initialStatus": "running",
+      "observedStatuses": [
+        "starting",
+        "starting",
+        "running",
+        "running",
+        "running",
+        "running",
+        "stopping",
+        "stopped"
+      ]
+    },
+    "darkReader": {
+      "mode": "dynamic",
+      "background": "rgb(24, 26, 27)",
+      "foreground": "rgb(232, 230, 227)"
+    },
+    "darkReaderAfterRestart": {
+      "mode": "dynamic",
+      "background": "rgb(24, 26, 27)",
+      "foreground": "rgb(232, 230, 227)"
+    },
+    "siteExceptionRestored": true
+  },
+  "publicCases": [
+    {
+      "name": "mdn",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API",
+      "status": "PASS",
+      "observed": {
+        "title": "Fetch API - Web APIs | MDN",
+        "url": "https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API",
+        "headings": [
+          "Fetch API"
+        ],
+        "mainVisible": true,
+        "styleSheets": 1,
+        "responseStatus": 200,
+        "images": 0,
+        "fetchAvailable": true
+      }
+    },
+    {
+      "name": "github",
+      "url": "https://github.com/chromium/chromium",
+      "status": "PASS",
+      "observed": {
+        "title": "GitHub - chromium/chromium: The official GitHub mirror of the Chromium source · GitHub",
+        "url": "https://github.com/chromium/chromium",
+        "headings": [],
+        "mainVisible": true,
+        "styleSheets": 24,
+        "responseStatus": 200,
+        "images": 9,
+        "fetchAvailable": true
+      }
+    },
+    {
+      "name": "public-webm",
+      "status": "PASS",
+      "before": {
+        "time": 0.02,
+        "width": 960,
+        "height": 540,
+        "frames": 4,
+        "error": null
+      },
+      "after": {
+        "time": 0.254607,
+        "frames": 11,
+        "error": null
+      }
+    },
+    {
+      "name": "wikipedia",
+      "url": "https://en.wikipedia.org/wiki/Web_browser",
+      "status": "PASS",
+      "observed": {
+        "title": "Web browser - Wikipedia",
+        "url": "https://en.wikipedia.org/wiki/Web_browser",
+        "headings": [
+          "Web browser"
+        ],
+        "mainVisible": true,
+        "styleSheets": 14,
+        "responseStatus": 200,
+        "images": 5,
+        "fetchAvailable": true
+      },
+      "internalNavigation": {
+        "url": "https://en.wikipedia.org/wiki/Google_Chrome",
+        "title": "Google Chrome - Wikipedia"
+      }
+    }
+  ],
+  "publicCaseEvidence": {
+    "mdnGithubWebm": ".profiles/compatibility-public-sites-first/report.json",
+    "wikipedia": ".profiles/compatibility-public-wiki-final/report.json",
+    "note": "Case evidence across two runs; the first overall run failed only its assumed internal Wikipedia link."
+  },
+  "publicWithExtensions": {
+    "status": "PASS",
+    "headed": true,
+    "cases": [
+      {
+        "name": "wikipedia",
+        "url": "https://en.wikipedia.org/wiki/Web_browser",
+        "status": "PASS",
+        "observed": {
+          "title": "Web browser - Wikipedia",
+          "url": "https://en.wikipedia.org/wiki/Web_browser",
+          "headings": [
+            "Web browser"
+          ],
+          "mainVisible": true,
+          "styleSheets": 13,
+          "responseStatus": 200,
+          "images": 5,
+          "fetchAvailable": true,
+          "darkReaderMode": null,
+          "theme": {
+            "background": "rgb(24, 26, 27)",
+            "foreground": "rgb(211, 207, 202)",
+            "convertedStyleSheets": 9
+          }
+        },
+        "internalNavigation": {
+          "url": "https://en.wikipedia.org/wiki/Google_Chrome",
+          "title": "Google Chrome - Wikipedia"
+        }
+      }
+    ],
+    "completedUtc": "2026-11-17T21:17:24.935Z",
+    "localArtifact": ".profiles/compatibility-cws-1794925717557/public-check-1794950210912/report.json"
+  },
+  "storeArtifact": ".profiles/compatibility-cws-1794925717557/store-check-1794950376442/report.json",
+  "historicalChecks": [
+    {
+      "localArtifact": ".profiles/compatibility-public-sites-first/report.json",
+      "status": "FAIL",
+      "reason": "Test assumed an internal Chromium article link which was not present; corrected to an observed Google Chrome article link."
+    },
+    {
+      "localArtifact": ".profiles/compatibility-cws-1794925717557/store-check-1794948835541/report.json",
+      "status": "FAIL",
+      "reason": "Inspector target presence was used as worker-running state; replaced with ServiceWorker.workerVersionUpdated runningStatus."
+    },
+    {
+      "localArtifact": ".profiles/compatibility-cws-1794925717557/public-check-1794949681373/report.json",
+      "status": "FAIL",
+      "reason": "Test required a private Dark Reader attribute; visual inspection and native DOM showed transformed styles were applied. Final assertion checks transformed rules and colors."
+    }
+  ]
+}

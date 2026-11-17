@@ -14,6 +14,8 @@ El filtrado cosmético nativo oculta elementos mediante reglas por dominio, clas
 
 Se verificó una extensión Manifest V3 local: permisos efectivos, mensajes, almacenamiento, DNR reversible, reactivación, actualización y persistencia tras reiniciar. Se corrigió el fallo de interceptación del service worker al arrancar con una extensión DNR. La primera carga y la batería completa en una ventana normal ya pasan sin recargar ni retrasar la navegación. También se comprobaron los casos sin manejador fetch y sin controlador. [Corrección y evidencia](docs/validation/2026-11-17-service-worker-fix.md).
 
+Se verificaron instalaciones reales de uBlock Origin Lite y Dark Reader desde Chrome Web Store: bloqueo independiente del nativo, estilos, permisos operativos y persistencia al reiniciar. La primera muestra de sitios cubre MDN, Wikipedia, el repositorio de Chromium en GitHub y reproducción WebM. También pasó Wikipedia con ambas extensiones en una ventana normal. [Resultados y límites](docs/validation/2026-11-17-store-and-sites.md).
+
 Siguen pendientes la actualización automática de listas, ampliar las pruebas de compatibilidad y extensiones, la comparación de memoria con Chrome y sitios reales, el instalador y las actualizaciones seguras del navegador. Esta versión no es una entrega pública terminada. La primera capa de bloqueo de red se documenta en `docs/validation/2026-11-15-protection.md`.
 
 ## Abrir la compilación
