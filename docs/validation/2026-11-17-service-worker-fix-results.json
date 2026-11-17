@@ -1,0 +1,144 @@
+{
+  "patch": "0010-senda-stopped-service-worker.patch",
+  "patchSha256": "db0db2e3f659779bbfc2e7a960ede575958e117bd24a798e4995ad37ae168232",
+  "finalIncrementalBuild": {
+    "status": "PASS",
+    "jobs": 4,
+    "steps": 2,
+    "seconds": 53.17
+  },
+  "patchReplay": {
+    "patches": 10,
+    "files": 75,
+    "replay": "PASS",
+    "matches_build_source": true
+  },
+  "nodeTests": {
+    "passed": 11,
+    "failed": 0
+  },
+  "runs": [
+    {
+      "label": "before-fix",
+      "localArtifact": ".profiles/compatibility-startup-dnr2/report.json",
+      "browserKind": "Senda",
+      "headed": true,
+      "status": "FAIL",
+      "phase": "startup probe: dnr-permission-only",
+      "completedUtc": "2026-11-17T13:35:17.881Z",
+      "revision": "fb096c0011f9d50f0a264a9376420cdea9c421e3",
+      "passedStages": [
+        "dnr-permission-only fresh",
+        "dnr-permission-only reloaded"
+      ],
+      "cleanupError": null,
+      "error": "AssertionError [ERR_ASSERTION]: Web compatibility failures after cold restart",
+      "startupCases": [
+        {
+          "name": "dnr-permission-only",
+          "coldResponse": "not found",
+          "reloadedResponse": "local-service-worker",
+          "expectedWorkerResponse": "local-service-worker",
+          "failed": true
+        }
+      ]
+    },
+    {
+      "label": "fixed-dnr",
+      "localArtifact": ".profiles/compatibility-fixed-dnr-final/report.json",
+      "browserKind": "Senda",
+      "headed": false,
+      "status": "PASS",
+      "phase": "complete",
+      "completedUtc": "2026-11-17T14:13:56.422Z",
+      "revision": "fb096c0011f9d50f0a264a9376420cdea9c421e3",
+      "passedStages": [
+        "dnr-permission-only fresh",
+        "dnr-permission-only cold restart",
+        "dnr-permission-only reloaded"
+      ],
+      "cleanupError": null,
+      "startupCases": [
+        {
+          "name": "dnr-permission-only",
+          "coldResponse": "local-service-worker",
+          "reloadedResponse": "local-service-worker",
+          "expectedWorkerResponse": "local-service-worker",
+          "failed": false
+        }
+      ]
+    },
+    {
+      "label": "fixed-without-fetch",
+      "localArtifact": ".profiles/compatibility-fixed-without-fetch/report.json",
+      "browserKind": "Senda",
+      "headed": false,
+      "status": "PASS",
+      "phase": "complete",
+      "completedUtc": "2026-11-17T14:15:06.974Z",
+      "revision": "fb096c0011f9d50f0a264a9376420cdea9c421e3",
+      "passedStages": [
+        "controller-without-fetch-handler fresh",
+        "controller-without-fetch-handler cold restart",
+        "controller-without-fetch-handler reloaded"
+      ],
+      "cleanupError": null,
+      "startupCases": [
+        {
+          "name": "controller-without-fetch-handler",
+          "coldResponse": "not found",
+          "reloadedResponse": "not found",
+          "expectedWorkerResponse": "not found",
+          "failed": false
+        }
+      ]
+    },
+    {
+      "label": "fixed-full-headed",
+      "localArtifact": ".profiles/compatibility-fixed-final-headed/report.json",
+      "browserKind": "Senda",
+      "headed": true,
+      "status": "PASS",
+      "phase": "complete",
+      "completedUtc": "2026-11-17T14:16:53.815Z",
+      "revision": "fb096c0011f9d50f0a264a9376420cdea9c421e3",
+      "passedStages": [
+        "baseline without extension",
+        "extension installation",
+        "extension APIs",
+        "worker stop and reactivation",
+        "extension update page",
+        "extension update",
+        "restart with extension",
+        "browser restart",
+        "navigation after worker unregistration"
+      ],
+      "cleanupError": null
+    },
+    {
+      "label": "reference-without-fetch",
+      "localArtifact": ".profiles/compatibility-reference-no-handler/report.json",
+      "browserKind": "Chrome for Testing",
+      "headed": false,
+      "status": "PASS",
+      "phase": "complete",
+      "completedUtc": "2026-11-17T14:06:33.538Z",
+      "revision": "fb096c0011f9d50f0a264a9376420cdea9c421e3",
+      "passedStages": [
+        "controller-without-fetch-handler fresh",
+        "controller-without-fetch-handler cold restart",
+        "controller-without-fetch-handler reloaded"
+      ],
+      "cleanupError": null,
+      "startupCases": [
+        {
+          "name": "controller-without-fetch-handler",
+          "coldResponse": "not found",
+          "reloadedResponse": "not found",
+          "expectedWorkerResponse": "not found",
+          "failed": false
+        }
+      ]
+    }
+  ]
+}

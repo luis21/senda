@@ -1,6 +1,8 @@
 # Service worker y extensiones durante el arranque
 
-Continuación de la [primera revisión de compatibilidad](2026-11-17-compatibility.md). El defecto sigue abierto; esta revisión reduce el escenario y diferencia la navegación inicial de la navegación posterior al arranque. No se modificó ni recompiló el motor.
+**Actualización posterior:** el caso se corrigió y verificó en Senda; consultar la [corrección y evidencia final](2026-11-17-service-worker-fix.md). Este documento conserva el diagnóstico anterior a la corrección.
+
+Continuación de la [primera revisión de compatibilidad](2026-11-17-compatibility.md). En esta etapa el defecto seguía abierto; la revisión redujo el escenario y diferenció la navegación inicial de la navegación posterior al arranque. Todavía no se había modificado ni recompilado el motor.
 
 ## Hallazgos comprobados
 

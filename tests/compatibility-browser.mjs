@@ -39,7 +39,7 @@ for(const file of ['manifest.json','worker.js','content.js']) await copyFile('te
 const report={startedUtc:new Date().toISOString(),revision:manifest.revision,browserKind:reference?'Chrome for Testing':'Senda',headed,startupProbe,navigationAfterStart,referenceMetadata,status:'running',stages:[]};
 const requests=[];
 const wasm=Buffer.from([0,97,115,109,1,0,0,0,1,7,1,96,2,127,127,1,127,3,2,1,0,7,7,1,3,97,100,100,0,0,10,9,1,7,0,32,0,32,1,106,11]);
-let port,active;
+let port,active,withoutFetchHandler=false;
 const webFiles=new Map(['/app.mjs','/math.mjs','/web-worker.js'].map(name=>[name,readFile('tests/fixtures/compat-web'+name)]));
 const server=http.createServer(async(req,res)=>{
   requests.push({host:req.headers.host,path:req.url});
@@ -49,8 +49,13 @@ const server=http.createServer(async(req,res)=>{
     if(pathname==='/page') {
       res.setHeader('Content-Type','text/html');
       res.end((await readFile('tests/fixtures/compat-web/page.html','utf8')).replaceAll('SERVER_PORT',String(port)));
+    } else if(pathname==='/uncontrolled') {
+      res.setHeader('Content-Type','text/html');res.end('<!doctype html><title>Uncontrolled compatibility page</title>');
     } else if(webFiles.has(pathname)) {
-      res.setHeader('Content-Type','text/javascript');res.end(await webFiles.get(pathname));
+      res.setHeader('Content-Type','text/javascript');
+      res.end(pathname==='/web-worker.js'&&withoutFetchHandler
+        ?await readFile('tests/fixtures/compat-web/worker-without-fetch.js')
+        :await webFiles.get(pathname));
     } else if(pathname==='/add.wasm') {res.setHeader('Content-Type','application/wasm');res.end(wasm);}
     else if(pathname==='/ad.js') {res.setHeader('Content-Type','text/javascript');res.end('window.nativeAdExecuted=true');}
     else if(pathname==='/extension-blocked') res.end('allowed');
@@ -118,10 +123,10 @@ async function stop() {
     if(exited())active=null;
   }
 }
-async function checkWeb(label,storedBefore) {
+async function checkWeb(label,storedBefore,expectedWorkerResponse='local-service-worker') {
   assert.equal(await evaluate('window.webFailure??null'),null);
   const value=await evaluate('window.webResults');
-  if(value.serviceWorker!=='local-service-worker') {
+  if(value.serviceWorker!==expectedWorkerResponse) {
     report.webFailureDetail=value;
     report.workerMessage=await evaluate(`new Promise((resolve,reject)=>{
       const channel=new MessageChannel();const timer=setTimeout(()=>reject(Error('Worker diagnostic timed out')),5000);
@@ -133,7 +138,7 @@ async function checkWeb(label,storedBefore) {
   }
   assert.equal(value.modules,42);assert.equal(value.dynamicImport,42);assert.equal(value.wasm,42);
   assert.equal(value.indexedDBBefore,storedBefore);assert.equal(value.cache,'local-cache');
-  assert.equal(value.serviceWorker,'local-service-worker');assert.deepEqual(value.canvas,[18,52,86,255]);
+  assert.equal(value.serviceWorker,expectedWorkerResponse);assert.deepEqual(value.canvas,[18,52,86,255]);
   assert.equal(value.grid,'100px 150px');
   if(!reference) {
     assert.equal(await evaluate('window.nativeAdExecuted===true'),false);
@@ -185,11 +190,14 @@ try {
       {name:'empty-extension',withExtension:true},
       {name:'dnr-permission-only',withExtension:true,dnr:true},
       {name:'dnr-navigation-after-start',withExtension:true,dnr:true,afterStart:true},
+      {name:'controller-without-fetch-handler',withExtension:true,dnr:true,withoutFetch:true},
     ];
     const selected=process.argv.find(arg=>arg.startsWith('--startup-case='))?.split('=')[1];
     assert.ok(!selected||specimens.some(specimen=>specimen.name===selected),'Unknown startup case');
     for(const specimen of specimens.filter(specimen=>!selected||specimen.name===selected)) {
       report.phase='startup probe: '+specimen.name;
+      withoutFetchHandler=Boolean(specimen.withoutFetch);
+      const expectedWorkerResponse=withoutFetchHandler?'not found':'local-service-worker';
       const extensionPath=path.join(runRoot,'extension-'+specimen.name);
       await mkdir(extensionPath);
       await writeFile(path.join(extensionPath,'manifest.json'),JSON.stringify({
@@ -198,18 +206,18 @@ try {
       }));
       const options={extensionPath,afterStart:Boolean(specimen.afterStart)};
       const profile=path.join(runRoot,specimen.name);
-      const result={name:specimen.name,afterStart:options.afterStart};
+      const result={name:specimen.name,afterStart:options.afterStart,expectedWorkerResponse};
       await start(profile,specimen.withExtension,specimen.withExtension,options);
-      await checkWeb(specimen.name+' fresh',null);await stop();
+      await checkWeb(specimen.name+' fresh',null,expectedWorkerResponse);await stop();
       await start(profile,specimen.withExtension,specimen.withExtension,options);
       result.cold=await evaluate('window.webResults');
-      try {await checkWeb(specimen.name+' cold restart',42);}
+      try {await checkWeb(specimen.name+' cold restart',42,expectedWorkerResponse);}
       catch(error) {
         if(!(error instanceof assert.AssertionError))throw error;
         result.error=error.message;failures.push(specimen.name);
       }
       await reloadPage();result.reloaded=await evaluate('window.webResults');
-      await checkWeb(specimen.name+' reloaded',42);await stop();
+      await checkWeb(specimen.name+' reloaded',42,expectedWorkerResponse);await stop();
       report.startupCases.push(result);
       console.log(JSON.stringify({name:result.name,cold:result.cold.serviceWorker,reloaded:result.reloaded.serviceWorker}));
     }
@@ -280,6 +288,14 @@ try {
   assert.notEqual(restarted.boot,afterUpdate.boot);
   report.stages.push({name:'restart with extension',version:restarted.version,storage:'PASS',DNR:'PASS'});
   await checkWeb('browser restart',42);
+  assert.equal(await evaluate('navigator.serviceWorker.getRegistration().then(registration=>registration.unregister())'),true);
+  await active.cdp.send('Page.navigate',{url:origin+'/uncontrolled'},active.session);
+  await until(()=>evaluate(`location.pathname==='/uncontrolled'&&document.readyState==='complete'&&navigator.serviceWorker.controller===null`),'page without a service worker controller');
+  const networkBefore=requests.filter(request=>request.path==='/sw-resource').length;
+  assert.equal(await evaluate(`fetch('/sw-resource',{cache:'no-store'}).then(response=>response.text())`),'not found');
+  assert.equal(requests.filter(request=>request.path==='/sw-resource').length-networkBefore,1);
+  await resource(true);
+  report.stages.push({name:'navigation after worker unregistration',controller:'absent',network:'PASS',DNR:'PASS'});
   }
   }
   report.status='PASS';

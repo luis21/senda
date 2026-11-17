@@ -1,5 +1,7 @@
 # Compatibilidad de extensiones y plataforma web — 2026-11-17
 
+**Actualización posterior:** el caso de arranque aquí registrado se corrigió y verificó en Senda. Consultar la [validación de la corrección](2026-11-17-service-worker-fix.md). Los resultados siguientes conservan la evidencia inicial.
+
 Resultado parcial: las comprobaciones de la extensión pasan; la batería conjunta termina en **FAIL** por un caso de service worker web después de reiniciar. No se declara completada la compatibilidad general.
 
 Navegador Senda existente: Chromium 156.0.8078.80, revisión `fb096c0011f9d50f0a264a9376420cdea9c421e3`, nueve parches verificados contra el sello de compilación. No se modificó ni recompiló el motor en esta revisión.
