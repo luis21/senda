@@ -48,6 +48,12 @@ try {
     & cmd.exe /d /c "`"$depot\autoninja.bat`" -C out\SendaDev chrome -j $Jobs"
     if ($LASTEXITCODE -ne 0) { throw 'Fallo de compilacion; lanzamiento bloqueado.' }
     if (-not (Test-Path -LiteralPath "$output/chrome.exe")) { throw 'Compilacion sin chrome.exe.' }
-    [IO.File]::WriteAllText($stamp, (@{status='success';revision=$manifest.revision;completedUtc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json))
+    $patchHashes = @{}
+    foreach ($patchName in (Get-Content -LiteralPath "$projectRoot/patches/series")) {
+        if ($patchName.Trim()) {
+            $patchHashes[$patchName.Trim()] = (Get-FileHash -LiteralPath "$projectRoot/patches/$($patchName.Trim())" -Algorithm SHA256).Hash
+        }
+    }
+    [IO.File]::WriteAllText($stamp, (@{patches=$patchHashes;status='success';revision=$manifest.revision;completedUtc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json))
 } finally { Pop-Location }
 Write-Output "Compilacion disponible en $output/chrome.exe. Validar las funciones modificadas antes de dar por terminada la entrega."

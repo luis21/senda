@@ -12,6 +12,8 @@ El ahorro de memoria está activado inicialmente en modo equilibrado (15 minutos
 
 El filtrado cosmético nativo oculta elementos mediante reglas por dominio, clase e identificador; también cubre cambios dinámicos y plantillas HTML. Se conservan las excepciones cosméticas de las listas. El panel de la barra muestra estado, solicitudes bloqueadas y un control para cambiar la excepción del sitio. Se verificaron sus estados activo/desactivado, contador cero, solicitudes tardías y de trabajadores web, y reinicio al navegar. Activar/desactivar desde el panel guarda el cambio y lo conserva al reiniciar el navegador. Evidencia y límites: `docs/validation/2026-11-15-cosmetic-protection.md` y `docs/validation/2026-11-16-protection-control.md`.
 
+Se añadieron pruebas reproducibles de una extensión Manifest V3 local: permisos efectivos, mensajes, almacenamiento, DNR reversible, reactivación, actualización y persistencia tras reiniciar. Hay un fallo abierto de interceptación del service worker web después de reiniciar con la extensión, reproducido también en Chrome for Testing de la misma versión. La batería completa permanece en FAIL; [resultados y reproducción](docs/validation/2026-11-17-compatibility.md).
+
 Siguen pendientes la actualización automática de listas, ampliar las pruebas de compatibilidad y extensiones, la comparación de memoria con Chrome y sitios reales, el instalador y las actualizaciones seguras del navegador. Esta versión no es una entrega pública terminada. La primera capa de bloqueo de red se documenta en `docs/validation/2026-11-15-protection.md`.
 
 ## Abrir la compilación

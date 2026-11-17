@@ -1,0 +1,322 @@
+[
+  {
+    "browserKind": "Senda",
+    "revision": "fb096c0011f9d50f0a264a9376420cdea9c421e3",
+    "status": "PASS",
+    "phase": "complete",
+    "startedUtc": "2026-11-17T13:16:54.016Z",
+    "completedUtc": "2026-11-17T13:17:08.917Z",
+    "stages": [
+      {
+        "name": "baseline without extension",
+        "web": {
+          "modules": 42,
+          "dynamicImport": 42,
+          "wasm": 42,
+          "indexedDBBefore": null,
+          "cache": "local-cache",
+          "serviceWorkerController": {
+            "state": "activating",
+            "scriptURL": "http://127.0.0.1:54183/web-worker.js"
+          },
+          "serviceWorker": "local-service-worker",
+          "canvas": [
+            18,
+            52,
+            86,
+            255
+          ],
+          "grid": "100px 150px"
+        },
+        "nativeBlocking": "PASS"
+      },
+      {
+        "name": "browser restart without extension",
+        "web": {
+          "modules": 42,
+          "dynamicImport": 42,
+          "wasm": 42,
+          "indexedDBBefore": 42,
+          "cache": "local-cache",
+          "serviceWorkerController": {
+            "state": "activated",
+            "scriptURL": "http://127.0.0.1:54183/web-worker.js"
+          },
+          "serviceWorker": "local-service-worker",
+          "canvas": [
+            18,
+            52,
+            86,
+            255
+          ],
+          "grid": "100px 150px"
+        },
+        "nativeBlocking": "PASS"
+      }
+    ]
+  },
+  {
+    "browserKind": "Senda",
+    "revision": "fb096c0011f9d50f0a264a9376420cdea9c421e3",
+    "status": "FAIL",
+    "phase": "browser restart",
+    "startedUtc": "2026-11-17T13:17:07.806Z",
+    "completedUtc": "2026-11-17T13:17:43.683Z",
+    "stages": [
+      {
+        "name": "baseline without extension",
+        "web": {
+          "modules": 42,
+          "dynamicImport": 42,
+          "wasm": 42,
+          "indexedDBBefore": null,
+          "cache": "local-cache",
+          "serviceWorkerController": {
+            "state": "activating",
+            "scriptURL": "http://127.0.0.1:55760/web-worker.js"
+          },
+          "serviceWorker": "local-service-worker",
+          "canvas": [
+            18,
+            52,
+            86,
+            255
+          ],
+          "grid": "100px 150px"
+        },
+        "nativeBlocking": "PASS"
+      },
+      {
+        "name": "extension installation",
+        "web": {
+          "modules": 42,
+          "dynamicImport": 42,
+          "wasm": 42,
+          "indexedDBBefore": null,
+          "cache": "local-cache",
+          "serviceWorkerController": {
+            "state": "activating",
+            "scriptURL": "http://127.0.0.1:55760/web-worker.js"
+          },
+          "serviceWorker": "local-service-worker",
+          "canvas": [
+            18,
+            52,
+            86,
+            255
+          ],
+          "grid": "100px 150px"
+        },
+        "nativeBlocking": "PASS"
+      },
+      {
+        "name": "extension APIs",
+        "version": "1.0.0",
+        "storage": "PASS",
+        "messaging": "PASS",
+        "hostPermissions": "PASS",
+        "reversibleDNR": "PASS"
+      },
+      {
+        "name": "worker stop and reactivation",
+        "newWorker": true,
+        "storage": "PASS",
+        "DNR": "PASS"
+      },
+      {
+        "name": "extension update page",
+        "web": {
+          "modules": 42,
+          "dynamicImport": 42,
+          "wasm": 42,
+          "indexedDBBefore": 42,
+          "cache": "local-cache",
+          "serviceWorkerController": {
+            "state": "activated",
+            "scriptURL": "http://127.0.0.1:55760/web-worker.js"
+          },
+          "serviceWorker": "local-service-worker",
+          "canvas": [
+            18,
+            52,
+            86,
+            255
+          ],
+          "grid": "100px 150px"
+        },
+        "nativeBlocking": "PASS"
+      },
+      {
+        "name": "extension update",
+        "version": "1.1.0",
+        "preservedStorage": "PASS",
+        "preservedDNR": "PASS"
+      },
+      {
+        "name": "restart with extension",
+        "version": "1.1.0",
+        "storage": "PASS",
+        "DNR": "PASS"
+      }
+    ],
+    "webFailureDetail": {
+      "modules": 42,
+      "dynamicImport": 42,
+      "wasm": 42,
+      "indexedDBBefore": 42,
+      "cache": "local-cache",
+      "serviceWorkerController": {
+        "state": "activated",
+        "scriptURL": "http://127.0.0.1:55760/web-worker.js"
+      },
+      "serviceWorker": "not found",
+      "canvas": [
+        18,
+        52,
+        86,
+        255
+      ],
+      "grid": "100px 150px"
+    },
+    "workerMessage": {
+      "paths": []
+    },
+    "workerFetchRetry": "not found"
+  },
+  {
+    "browserKind": "Chrome for Testing",
+    "revision": "fb096c0011f9d50f0a264a9376420cdea9c421e3",
+    "status": "FAIL",
+    "phase": "browser restart",
+    "startedUtc": "2026-11-17T13:17:56.977Z",
+    "completedUtc": "2026-11-17T13:18:02.312Z",
+    "stages": [
+      {
+        "name": "baseline without extension",
+        "web": {
+          "modules": 42,
+          "dynamicImport": 42,
+          "wasm": 42,
+          "indexedDBBefore": null,
+          "cache": "local-cache",
+          "serviceWorkerController": {
+            "state": "activating",
+            "scriptURL": "http://127.0.0.1:54336/web-worker.js"
+          },
+          "serviceWorker": "local-service-worker",
+          "canvas": [
+            18,
+            52,
+            86,
+            255
+          ],
+          "grid": "100px 150px"
+        },
+        "nativeBlocking": "not applicable"
+      },
+      {
+        "name": "extension installation",
+        "web": {
+          "modules": 42,
+          "dynamicImport": 42,
+          "wasm": 42,
+          "indexedDBBefore": null,
+          "cache": "local-cache",
+          "serviceWorkerController": {
+            "state": "activating",
+            "scriptURL": "http://127.0.0.1:54336/web-worker.js"
+          },
+          "serviceWorker": "local-service-worker",
+          "canvas": [
+            18,
+            52,
+            86,
+            255
+          ],
+          "grid": "100px 150px"
+        },
+        "nativeBlocking": "not applicable"
+      },
+      {
+        "name": "extension APIs",
+        "version": "1.0.0",
+        "storage": "PASS",
+        "messaging": "PASS",
+        "hostPermissions": "PASS",
+        "reversibleDNR": "PASS"
+      },
+      {
+        "name": "worker stop and reactivation",
+        "newWorker": true,
+        "storage": "PASS",
+        "DNR": "PASS"
+      },
+      {
+        "name": "extension update page",
+        "web": {
+          "modules": 42,
+          "dynamicImport": 42,
+          "wasm": 42,
+          "indexedDBBefore": 42,
+          "cache": "local-cache",
+          "serviceWorkerController": {
+            "state": "activated",
+            "scriptURL": "http://127.0.0.1:54336/web-worker.js"
+          },
+          "serviceWorker": "local-service-worker",
+          "canvas": [
+            18,
+            52,
+            86,
+            255
+          ],
+          "grid": "100px 150px"
+        },
+        "nativeBlocking": "not applicable"
+      },
+      {
+        "name": "extension update",
+        "version": "1.1.0",
+        "preservedStorage": "PASS",
+        "preservedDNR": "PASS"
+      },
+      {
+        "name": "restart with extension",
+        "version": "1.1.0",
+        "storage": "PASS",
+        "DNR": "PASS"
+      }
+    ],
+    "webFailureDetail": {
+      "modules": 42,
+      "dynamicImport": 42,
+      "wasm": 42,
+      "indexedDBBefore": 42,
+      "cache": "local-cache",
+      "serviceWorkerController": {
+        "state": "activated",
+        "scriptURL": "http://127.0.0.1:54336/web-worker.js"
+      },
+      "serviceWorker": "not found",
+      "canvas": [
+        18,
+        52,
+        86,
+        255
+      ],
+      "grid": "100px 150px"
+    },
+    "workerMessage": {
+      "paths": []
+    },
+    "workerFetchRetry": "not found",
+    "referenceMetadata": {
+      "sha256": "A0DFAD5EF821278FD97FBA81BBC485F48969E376B9C82C4301DBDCD6644BA054",
+      "url": "https://storage.googleapis.com/chrome-for-testing-public/156.0.8078.80/win64/chrome-win64.zip",
+      "version": "156.0.8078.80",
+      "googleStorageMd5": "15XTLfpFBuZ/btqLi5xU2A==",
+      "zipSha256": "16EDB57D6107BF1C48A7C149B8D78B155FE614410093796DD72441FD6640540F",
+      "signature": "NotSigned"
+    }
+  }
+]
