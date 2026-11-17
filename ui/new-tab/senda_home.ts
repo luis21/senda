@@ -1,5 +1,5 @@
 // Copyright 2026 Senda contributors. All rights reserved.
-import {normalizeUrl, normalizeState, searchUrl, readState, writeState, STORAGE_KEY, editedLinkIndex} from './senda_home_state.js';
+import {normalizeUrl, normalizeState, searchUrl, readState, writeState, STORAGE_KEY, editedLinkIndex, MAX_LINKS, shouldShowWelcome, localFaviconUrl} from './senda_home_state.js';
 import type {Preferences} from './senda_home_state.js';
 
 interface Appearance {scheme: number; palette: number; editable: boolean;}
@@ -42,6 +42,7 @@ catch { storage = {getItem() { throw Error('unavailable'); }, setItem() { throw 
 const loaded = readState(storage);
 let state = loaded.state;
 let editing = -1;
+button('customize').disabled = !nativeReady;
 const names = {duckduckgo: 'DuckDuckGo', google: 'Google', bing: 'Bing'};
 function report(text: string) { $('status').textContent = text; }
 function persist(message: string) {
@@ -74,20 +75,44 @@ function render() {
   renderAppearance(state);
   $('engine-name').textContent = names[state.engine];
   $('empty').hidden = state.links.length > 0;
-  button('add-link').disabled = state.links.length >= 12;
-  $('add-link').title = state.links.length >= 12 ? 'Puedes guardar hasta doce accesos' : '';
+  button('add-link').disabled = state.links.length >= MAX_LINKS;
+  $('add-link').title = state.links.length >= MAX_LINKS ? 'Puedes guardar hasta 48 sitios' : '';
   const children = state.links.map((link, index) => {
     const tile = document.createElement('div'); tile.className = 'site';
     const a = document.createElement('a'); a.href = link.url; a.title = link.title;
     const icon = document.createElement('span'); icon.className = 'monogram'; icon.setAttribute('aria-hidden', 'true');
-    icon.textContent = Array.from(link.title).slice(0, 1).join('').toLocaleUpperCase();
+    const letter = document.createElement('span'); letter.className = 'monogram-letter';
+    letter.textContent = Array.from(link.title).slice(0, 1).join('').toLocaleUpperCase();
+    icon.append(letter);
+    if (location.protocol === 'chrome:') {
+      const image = document.createElement('img'); image.alt = ''; image.width = 64; image.height = 64;
+      image.loading = 'lazy'; image.decoding = 'async'; image.referrerPolicy = 'no-referrer';
+      image.addEventListener('load', () => { icon.classList.add('has-icon'); icon.dataset['favicon'] = 'loaded'; });
+      image.addEventListener('error', () => { image.hidden = true; icon.dataset['favicon'] = 'missing'; });
+      image.src = localFaviconUrl(link.url)!;
+      icon.append(image);
+    }
     const label = document.createElement('span'); label.className = 'site-name'; label.textContent = link.title;
     a.append(icon, label);
     const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'text-button edit'; edit.textContent = '⋯'; edit.setAttribute('aria-label', 'Editar ' + link.title); edit.addEventListener('click', () => openLink(index));
     tile.append(a, edit); return tile;
   });
-  $('links').replaceChildren(...children);
+  $('links').replaceChildren(...children, button('add-link'));
 }
+function showWelcome(visible: boolean, focus = false) {
+  $('welcome').hidden = !visible; $('home').hidden = visible;
+  if (visible) {
+    input('welcome-hide').checked = state.hideWelcome || !state.welcomeSeen;
+    $('welcome-kicker').textContent = state.welcomeSeen ? 'Novedades de Senda' : 'Bienvenido a Senda';
+    $('welcome-heading').textContent = state.welcomeSeen ? 'Conoce tu nuevo Senda.' : 'Tu próxima ruta empieza aquí.';
+  }
+  if (focus) (visible ? $('welcome-heading') : input('search')).focus();
+}
+$('open-welcome').addEventListener('click', () => showWelcome(true, true));
+$('start-browsing').addEventListener('click', () => {
+  state = normalizeState({...state, welcomeSeen: true, hideWelcome: input('welcome-hide').checked});
+  render(); showWelcome(false, true); persist('Tu inicio está listo.');
+});
 $('search-form').addEventListener('submit', event => {
   event.preventDefault();
   const url = searchUrl(input('search').value, state.engine);
@@ -96,7 +121,8 @@ $('search-form').addEventListener('submit', event => {
 function settingsValue(): Preferences {
   return normalizeState({...state, theme: select('theme').value, engine: select('engine').value,
     palette: select('palette').value, background: select('background').value,
-    layout: select('layout').value, showLinks: input('show-links').checked});
+    layout: select('layout').value, showLinks: input('show-links').checked,
+    hideWelcome: input('hide-welcome').checked});
 }
 async function readAppearance() {
   if (!native) return;
@@ -112,6 +138,7 @@ $('customize').addEventListener('click', async () => {
   const currentOption = select('palette').querySelector<HTMLOptionElement>('option[value="custom"]')!;
   currentOption.hidden = currentOption.disabled = state.palette !== 'custom';
   input('show-links').checked = state.showLinks;
+  input('hide-welcome').checked = state.hideWelcome;
   select('theme').disabled = select('palette').disabled = !nativeReady || appearance?.editable === false;
   dialog('settings-dialog').showModal();
 });
@@ -120,6 +147,7 @@ dialog('settings-dialog').addEventListener('close', () => renderAppearance(state
 $('settings-form').addEventListener('submit', async event => {
   event.preventDefault();
   const next = settingsValue();
+  if (next.hideWelcome) next.welcomeSeen = true;
   const save = document.querySelector<HTMLButtonElement>('#settings-form button[type="submit"]')!;
   save.disabled = true;
   try {
@@ -133,6 +161,7 @@ $('settings-form').addEventListener('submit', async event => {
     }
     state = next;
   render(); persist('Preferencias guardadas.'); dialog('settings-dialog').close();
+    showWelcome(shouldShowWelcome(state));
   } catch { report('No se pudo aplicar la apariencia. Vuelve a intentarlo.'); }
   finally { save.disabled = false; }
 });
@@ -144,7 +173,7 @@ $('link-form').addEventListener('submit', event => {
   if (state.links.some((link, i) => link.url === url && i !== editing)) { $('link-error').textContent = 'Ya tienes un acceso a esta dirección.'; return; }
   const link = {title: input('link-title').value.trim().slice(0,40) || new URL(url).hostname, url};
   if (editing >= 0) state.links[editing] = link;
-  else if (state.links.length < 12) state.links.push(link);
+  else if (state.links.length < MAX_LINKS) state.links.push(link);
   const savedIndex = editing >= 0 ? editing : state.links.length - 1;
   render(); persist(editing < 0 ? 'Acceso añadido.' : 'Acceso actualizado.'); dialog('link-dialog').close();
   focusLink(savedIndex);
@@ -171,16 +200,21 @@ window.addEventListener('storage', event => {
     }
   }
   state = next;
-  if (!dialog('settings-dialog').open) render();
+  if (!dialog('settings-dialog').open) { render(); showWelcome(shouldShowWelcome(state)); }
 });
+showWelcome(shouldShowWelcome(state));
 if (location.protocol === 'chrome:') {
   // The preview has no native dependencies. Chromium compiles this adapter separately.
   const adapter = './senda_appearance.js';
   import(adapter).then(async module => {
     native = module.getAppearanceHandler() as NativeAppearance;
     await readAppearance(); nativeReady = true;
+    button('customize').disabled = false;
     if (appearance?.editable === false) $('appearance-note').textContent = 'La apariencia está administrada por tu organización.';
-  }).catch(() => report('La apariencia del navegador no está disponible. Puedes personalizar el inicio.'));
+  }).catch(() => {
+    native = undefined; button('customize').disabled = false;
+    report('La apariencia del navegador no está disponible. Puedes personalizar el inicio.');
+  });
 } else {
   $('appearance-note').textContent = 'Vista previa: estos colores solo afectan a esta página.';
 }

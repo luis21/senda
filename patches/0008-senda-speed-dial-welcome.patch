@@ -1,0 +1,1209 @@
+diff --git a/chrome/browser/resources/new_tab_page/new_tab_page.html b/chrome/browser/resources/new_tab_page/new_tab_page.html
+--- a/chrome/browser/resources/new_tab_page/new_tab_page.html
++++ b/chrome/browser/resources/new_tab_page/new_tab_page.html
+@@ -11,33 +11,42 @@
+ <body>
+   <header class="topbar">
+     <a class="brand" href="#search" aria-label="Senda, ir al buscador">
+-      <svg viewBox="0 0 40 40" aria-hidden="true"><path d="M29 8H18a8 8 0 0 0 0 16h4a4 4 0 0 1 0 8H11"/><circle cx="29" cy="8" r="3"/><circle cx="11" cy="32" r="3"/></svg>
++      <img class="brand-icon" src="senda_icon.svg" width="36" height="36" alt="">
+       <span>Senda</span>
+     </a>
+-    <button id="customize" class="text-button" type="button" aria-haspopup="dialog">
++    <nav class="home-tools" aria-label="Opciones de inicio"><button id="open-welcome" class="text-button" type="button">Novedades</button>
++    <button id="customize" class="text-button" type="button" aria-haspopup="dialog" disabled>
+       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16M9 4v6m6 4v6"/></svg>
+       Personalizar
+-    </button>
++    </button></nav>
+   </header>
+-  <main>
++  <main id="home" hidden>
+     <section class="journey" aria-labelledby="heading">
+-      <p class="intro">Un nuevo comienzo.</p>
+-      <h1 id="heading">¿A dónde vamos?</h1>
++      <h1 id="heading" class="sr-only">¿A dónde vamos?</h1>
+       <form id="search-form" role="search">
+         <label for="search" class="sr-only">Buscar en la web</label>
+         <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>
+-        <input id="search" type="search" placeholder="Busca algo que te inspire" autocomplete="off" spellcheck="false" required>
++        <input id="search" type="search" placeholder="Busca en la web" autocomplete="off" spellcheck="false" required>
+         <button class="search-submit" type="submit" aria-label="Buscar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button>
+       </form>
+       <p class="engine-note">Buscar con <span id="engine-name">DuckDuckGo</span></p>
+     </section>
+     <section id="sites" class="sites" aria-labelledby="sites-heading">
+-      <div class="section-heading"><h2 id="sites-heading">Tus sitios</h2><button id="add-link" class="text-button" type="button" aria-haspopup="dialog">+ Añadir acceso</button></div>
+-      <div id="links" class="links"></div>
+-      <div id="empty" class="empty"><span class="empty-symbol" aria-hidden="true">↗</span><p>Lo que visitas, más cerca.</p><span>Añade tus sitios favoritos para tenerlos a mano.</span></div>
++      <h2 id="sites-heading" class="sr-only">Tus sitios</h2>
++      <div id="links" class="links"><button id="add-link" class="add-site" type="button" aria-haspopup="dialog"><span class="add-tile" aria-hidden="true">+</span><span>Añadir un sitio</span></button></div>
++      <div id="empty" class="empty"><p>Tu web, a un clic.</p><span>Añade tus sitios para crear tu propio inicio.</span></div>
+     </section>
+     <p id="status" role="status" aria-live="polite"></p>
+   </main>
++  <section id="welcome" class="welcome" aria-labelledby="welcome-heading" hidden>
++    <div class="welcome-intro"><img src="senda_icon.svg" width="72" height="72" alt=""><p id="welcome-kicker" class="welcome-kicker">Bienvenido a Senda</p><h1 id="welcome-heading" tabindex="-1">Tu próxima ruta empieza aquí.</h1><p>Un inicio a tu manera, con menos distracciones.</p></div>
++    <div class="welcome-features">
++      <article><span class="feature-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><path d="M14 17h7m-3.5-3.5v7"/></svg></span><h2>Tu web, más cerca</h2><p>Mosaicos para tus sitios, fondos y cinco paletas para el inicio, la barra y las pestañas.</p></article>
++      <article><span class="feature-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 4-5 7-8 9-3-2-8-5-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></svg></span><h2>Protección integrada</h2><p>Bloqueo de anuncios y rastreadores con controles por sitio, sin instalar una extensión.</p></article>
++      <article><span class="feature-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9 1v4m6-4v4M9 19v4m6-4v4M1 9h4m-4 6h4m14-6h4m-4 6h4"/></svg></span><h2>Espacio para lo que usas</h2><p>El ahorro de memoria libera pestañas inactivas y conserva las que necesitan seguir trabajando.</p></article>
++    </div>
++    <div class="welcome-actions"><button id="start-browsing" class="primary" type="button">Empezar a navegar</button><label class="welcome-toggle"><input id="welcome-hide" type="checkbox" checked> Ocultar bienvenida y novedades</label><p>Siempre puedes volver desde «Novedades».</p></div>
++  </section>
+   <dialog id="settings-dialog" aria-labelledby="settings-heading">
+     <form id="settings-form">
+       <div class="dialog-heading"><h2 id="settings-heading">A tu manera</h2><button class="close text-button" type="button" data-close="settings-dialog" aria-label="Cerrar personalización">×</button></div>
+@@ -48,9 +57,10 @@
+       <div class="palette-sample" aria-hidden="true"><span></span><span></span><span></span></div>
+       <p id="appearance-note" class="field-note">El color y la apariencia se aplican a la barra y las pestañas al guardar.</p>
+       <h3>Página de inicio</h3>
+-      <label for="background">Fondo</label><select id="background"><option value="plain">Liso</option><option value="mist">Bruma de color</option><option value="lines">Líneas suaves</option></select>
++      <label for="background">Fondo</label><select id="background"><option value="folds">Pliegues</option><option value="plain">Liso</option><option value="mist">Bruma de color</option><option value="lines">Líneas suaves</option></select>
+       <label for="layout">Distribución de accesos</label><select id="layout"><option value="comfortable">Cómoda</option><option value="compact">Compacta</option></select>
+       <label class="check-label"><input id="show-links" type="checkbox"> Mostrar mis sitios</label>
++      <label class="check-label"><input id="hide-welcome" type="checkbox"> Ocultar bienvenida y novedades</label>
+       <label for="engine">Buscador de esta página</label><select id="engine"><option value="duckduckgo">DuckDuckGo</option><option value="google">Google</option><option value="bing">Bing</option></select>
+       <p class="field-note">Tus preferencias se guardan en este perfil.</p>
+       <div class="dialog-actions"><button type="button" class="secondary" data-close="settings-dialog">Cancelar</button><button type="submit" class="primary">Guardar</button></div>
+diff --git a/chrome/browser/resources/new_tab_page/senda_home.css b/chrome/browser/resources/new_tab_page/senda_home.css
+--- a/chrome/browser/resources/new_tab_page/senda_home.css
++++ b/chrome/browser/resources/new_tab_page/senda_home.css
+@@ -1,383 +1,451 @@
+-:root{color-scheme:light;
+---bg:#f2f6fc;
+---surface:#fff;
+---ink:#1d2d44;
+---muted:#5b6c83;
+---seed:#285db5;
+---accent:var(--seed);
+---soft:color-mix(in srgb,var(--seed) 10%,var(--surface));
+---line:#ccd8e8;
+---shadow:0 12px 42px #263e6610;
+---error:#a62938;
+-font-family:'Segoe UI Variable','Segoe UI',sans-serif;
+-color:var(--ink);
+-background:var(--bg);}
+-@media(prefers-color-scheme: dark){:root:not([data-theme=light]){color-scheme:dark;
+---bg:#182231;
+---surface:#202e42;
+---ink:#e5edf8;
+---muted:#a9b9ce;
+---accent:#9bbfff;
+---soft:color-mix(in srgb,var(--seed) 18%,var(--surface));
+---line:#41536d;
+---shadow:0 12px 42px #0002;
+---error:#ffabb5;}}
+-
+-:root[data-theme=dark]{color-scheme:dark;
+---bg:#182231;
+---surface:#202e42;
+---ink:#e5edf8;
+---muted:#a9b9ce;
+---accent:#9bbfff;
+---soft:color-mix(in srgb,var(--seed) 18%,var(--surface));
+---line:#41536d;
+---shadow:0 12px 42px #0002;
+---error:#ffabb5;}
+-
+-*{box-sizing:border-box;}
+-
+-body{margin:0;
+-background:var(--bg);
+-min-height:100vh;}
++:root {
++  color-scheme: light;
++  --bg:#e6eef4;
++ --surface:#fff;
++ --ink:#20394d;
++ --muted:#52677a;
++  --seed:#285db5;
++ --accent:var(--seed);
++ --line:#b9cbdc;
++  --soft:color-mix(in srgb,var(--seed) 10%,var(--surface));
++ --error:#a62938;
++  font-family:'Segoe UI Variable','Segoe UI',sans-serif;
++ color:var(--ink);
++ background:var(--bg);
++}
++
++:root[data-palette='forest'] { --seed:#276b54; }
++
++:root[data-palette='clay'] { --seed:#a34b35; }
++
++:root[data-palette='violet'] { --seed:#7151a5; }
++
++:root[data-palette='slate'] { --seed:#526578; }
++
++:root[data-theme='dark'] {
++  color-scheme:dark;
++ --bg:#162332;
++ --surface:#22364a;
++ --ink:#ecf2f7;
++ --muted:#b5c6d6;
++  --line:#496176;
++ --accent:color-mix(in srgb,var(--seed) 45%,white);
++ --error:#ffabb5;
++}
++@media(prefers-color-scheme: dark) {
++  :root:not([data-theme='light']) {
++    color-scheme:dark;
++ --bg:#162332;
++ --surface:#22364a;
++ --ink:#ecf2f7;
++ --muted:#b5c6d6;
++    --line:#496176;
++ --accent:color-mix(in srgb,var(--seed) 45%,white);
++ --error:#ffabb5;
++  }
++}
++
++* { box-sizing:border-box; }
++
++body { margin:0;
++ min-height:100vh;
++ background:var(--bg); }
++
++:root[data-background='folds'] body { background:linear-gradient(color-mix(in srgb,var(--bg) 8%,transparent),color-mix(in srgb,var(--bg) 8%,transparent)),url('senda_wallpaper.svg') center/cover fixed; }
++
++:root[data-theme='dark'][data-background='folds'] body { background:linear-gradient(#102235aa,#102235aa),url('senda_wallpaper.svg') center/cover fixed; }
++@media(prefers-color-scheme: dark) {
++  :root:not([data-theme='light'])[data-background='folds'] body { background:linear-gradient(#102235aa,#102235aa),url('senda_wallpaper.svg') center/cover fixed; }
++}
++
++:root[data-background='mist'] body { background:radial-gradient(ellipse at 12% 8%,color-mix(in srgb,var(--seed) 16%,transparent),transparent 58%),var(--bg); }
++
++:root[data-background='lines'] body { background:repeating-linear-gradient(125deg,transparent 0 58px,color-mix(in srgb,var(--seed) 6%,transparent) 59px 60px),var(--bg); }
+ 
+ button,
+ input,
+-select{font:inherit;}
+-
+-button,
+-a,
+-input,
+-select{ -webkit-tap-highlight-color:transparent;}
+-
+-button{cursor:pointer;}
+-
+-svg{width:24px;
+-height:24px;
+-fill:none;
+-stroke:currentColor;
+-stroke-width:1.6;
+-stroke-linecap:round;
+-stroke-linejoin:round;
+-flex:none;}
++select { font:inherit; }
++
++button { cursor:pointer; }
++
++button:disabled { cursor:default;
++ opacity:.55; }
+ 
+ button:focus-visible,
+ a:focus-visible,
+ input:focus-visible,
+-select:focus-visible{outline:3px solid var(--accent);
+-outline-offset:4px;}
+-
+-a{color:inherit;
+-text-decoration:none;}
+-
+-.topbar{display:flex;
+-align-items:center;
+-justify-content:space-between;
+-padding:30px 48px;}
+-
+-.brand{display:flex;
+-align-items:center;
+-gap:10px;
+-font-size:27px;
+-font-weight:600;
+-letter-spacing:-1px;}
+-
+-.brand svg{width:36px;
+-height:36px;
+-color:var(--accent);
+-stroke-width:2.3;}
+-
+-.text-button{display:inline-flex;
+-align-items:center;
+-justify-content:center;
+-gap:8px;
+-padding:10px 12px;
+-border:0;
+-border-radius:8px;
+-color:var(--muted);
+-background:transparent;
+-font-size:14px;}
+-
+-.text-button:hover{background:var(--soft);
+-color:var(--ink);}
+-
+-main{max-width:800px;
+-margin:0 auto;
+-padding:0 36px 30px;}
+-
+-.journey{padding:64px 0 0;}
+-
+-.intro{margin:0 0 12px;
+-color:var(--muted);
+-font-size:16px;}
+-
+-h1{font-size:clamp(36px,5vw,60px);
+-line-height:1.15;
+-font-weight:400;
+-letter-spacing:-2.4px;
+-margin:0 0 34px;}
+-
+-#search-form{display:flex;
+-align-items:center;
+-gap:14px;
+-padding:10px 12px 10px 22px;
+-min-height:74px;
+-background:var(--surface);
+-border:1px solid var(--line);
+-border-radius:18px;
+-box-shadow:var(--shadow);}
+-
+-#search-form:focus-within{border-color:var(--accent);}
+-
+-.search-icon{color:var(--muted);
+-width:22px;}
+-
+-#search{min-width:0;
+-flex:1;
+-border:0;
+-outline:none;
+-background:transparent;
+-color:var(--ink);
+-padding:10px 0;
+-font-size:17px;}
+-
+-#search:focus-visible{outline:none;}
+-
+-#search::placeholder{color:var(--muted);
+-opacity:1;}
+-
+-.search-submit{border:0;
+-border-radius:12px;
+-background:var(--soft);
+-color:var(--accent);
+-height:48px;
+-width:48px;
+-display:grid;
+-place-items:center;}
+-
+-.search-submit:hover{filter:brightness(.96);}
+-
+-.engine-note{font-size:12px;
+-margin:13px 0 0;
+-color:var(--muted);}
+-
+-.engine-note span{color:var(--ink);}
+-
+-.sites{margin-top:56px;}
+-
+-.section-heading{display:flex;
+-align-items:center;
+-justify-content:space-between;
+-gap:12px;
+-border-bottom:1px solid var(--line);
+-padding-bottom:12px;}
+-
+-h2{font-size:17px;
+-font-weight:600;
+-margin:0;}
+-
+-.links{display:grid;
+-grid-template-columns:repeat(4,minmax(0,1fr));
+-gap:14px;
+-margin-top:22px;}
+-
+-.site{position:relative;
+-min-width:0;}
+-
+-.site a{display:flex;
+-flex-direction:column;
+-align-items:center;
+-gap:11px;
+-padding:14px 8px 12px;
+-border-radius:12px;
+-min-height:122px;}
+-
+-.site a:hover{background:var(--soft);}
+-
+-.monogram{display:grid;
+-place-items:center;
+-width:48px;
+-height:48px;
+-border:1px solid var(--line);
+-border-radius:15px;
+-background:var(--surface);
+-color:var(--accent);
+-font-size:18px;
+-font-weight:600;}
+-
+-.site-name{max-width:100%;
+-overflow:hidden;
+-white-space:nowrap;
+-text-overflow:ellipsis;
+-font-size:13px;}
+-
+-.edit{position:absolute;
+-right:2px;
+-top:0;
+-width:28px;
+-height:28px;
+-padding:0;
+-font-size:17px;
+-opacity:0;}
++select:focus-visible { outline:3px solid var(--accent);
++ outline-offset:4px; }
++
++a { color:inherit;
++ text-decoration:none; }
++
++svg { width:24px;
++ height:24px;
++ fill:none;
++ stroke:currentColor;
++ stroke-width:1.6;
++ stroke-linecap:round;
++ stroke-linejoin:round;
++ flex:none; }
++
++.topbar { display:flex;
++ align-items:center;
++ justify-content:space-between;
++ padding:22px 34px;
++ gap:14px; }
++
++.brand { display:flex;
++ align-items:center;
++ gap:9px;
++ font-size:24px;
++ font-weight:600;
++ letter-spacing:-.8px; }
++
++.brand-icon { width:32px;
++ height:32px; }
++
++.home-tools { display:flex;
++ gap:6px; }
++
++.text-button { display:inline-flex;
++ align-items:center;
++ justify-content:center;
++ gap:8px;
++ padding:9px 12px;
++ border:0;
++ border-radius:9px;
++ color:var(--ink);
++ background:transparent;
++ font-size:13px; }
++
++.text-button:hover { background:var(--soft); }
++
++#home { max-width:1080px;
++ margin:0 auto;
++ padding:0 36px 40px; }
++
++.journey { max-width:640px;
++ margin:0 auto;
++ padding-top:64px; }
++
++#search-form { display:flex;
++ align-items:center;
++ gap:15px;
++ min-height:64px;
++ padding:8px 12px 8px 22px;
++ background:var(--surface);
++ border:1px solid transparent;
++ border-radius:21px;
++ box-shadow:0 9px 25px #193d5924; }
++
++#search-form:focus-within { border-color:var(--accent); }
++
++.search-icon { color:var(--accent);
++ width:24px; }
++
++#search { min-width:0;
++ flex:1;
++ border:0;
++ outline:none;
++ background:transparent;
++ color:var(--ink);
++ padding:10px 0;
++ font-size:16px; }
++
++#search:focus-visible { outline:none; }
++
++#search::placeholder { color:var(--muted);
++ opacity:1; }
++
++.search-submit { display:grid;
++ place-items:center;
++ width:42px;
++ height:42px;
++ border:0;
++ border-radius:12px;
++ background:transparent;
++ color:var(--ink); }
++
++.search-submit:hover { background:var(--soft); }
++
++.engine-note { margin:10px 0 0;
++ color:var(--muted);
++ font-size:11px;
++ text-align:center; }
++
++.sites { margin-top:72px; }
++
++.links { display:grid;
++ grid-template-columns:repeat(6,minmax(0,1fr));
++ gap:25px 22px; }
++
++.site { position:relative;
++ min-width:0; }
++
++.site a { display:flex;
++ flex-direction:column;
++ align-items:center;
++ gap:9px;
++ border-radius:18px; }
++
++.monogram { position:relative;
++ display:grid;
++ place-items:center;
++ width:100%;
++ height:90px;
++ border:1px solid color-mix(in srgb,var(--surface) 70%,transparent);
++ border-radius:19px;
++ background:color-mix(in srgb,var(--surface) 92%,transparent);
++ color:var(--accent);
++ box-shadow:0 5px 12px #1f394a24;
++ font-size:34px;
++ font-weight:600; }
++
++.monogram img { display:block;
++position:absolute;
++left:50%;
++top:50%;
++transform:translate(-50%,-50%);
++opacity:0;
++ max-width:64px;
++ max-height:64px;
++ object-fit:contain; }
++
++.has-icon img { opacity:1; }
++
++.has-icon .monogram-letter { display:none; }
++
++.site a:hover .monogram { background:var(--surface);
++ box-shadow:0 7px 18px #1f394a40; }
++
++.site-name { display:block;
++ max-width:100%;
++ overflow:hidden;
++ white-space:nowrap;
++ text-overflow:ellipsis;
++ font-size:12px;
++ color:var(--ink);
++ padding:0 3px; }
++
++.edit { position:absolute;
++ right:3px;
++ top:3px;
++ width:28px;
++ height:25px;
++ padding:0;
++ font-size:20px;
++ opacity:0;
++ background:var(--surface); }
+ 
+ .site:hover .edit,
+-.site:focus-within .edit{opacity:1;}
+-
+-.empty{text-align:center;
+-padding:26px 10px 18px;
+-color:var(--muted);}
+-
+-.empty-symbol{display:block;
+-font-size:31px;
+-color:var(--accent);
+-line-height:1;}
+-
+-.empty p{margin:12px 0 6px;
+-color:var(--ink);
+-font-size:16px;}
+-
+-.empty>span:last-child{font-size:13px;}
+-
+-#status{color:var(--muted);
+-font-size:13px;
+-line-height:1.5;
+-min-height:20px;
+-margin:26px 0 0;}
+-
+-dialog{padding:26px;
+-border:1px solid var(--line);
+-border-radius:20px;
+-background:var(--surface);
+-color:var(--ink);
+-width:min(440px,calc(100% - 32px));
+-box-shadow:0 28px 90px #0003;}
+-
+-dialog::backdrop{background:#0b1a3459;
+-backdrop-filter:blur(4px);}
+-
+-.dialog-heading{display:flex;
+-align-items:center;
+-justify-content:space-between;
+-gap:12px;}
+-
+-.dialog-heading h2{font-size:23px;
+-font-weight:500;
+-letter-spacing:-.5px;}
+-
+-.close{padding:0;
+-width:30px;
+-height:30px;
+-font-size:26px;}
+-
+-.dialog-copy{color:var(--muted);
+-font-size:14px;
+-margin:8px 0 24px;}
+-
+-dialog label{display:block;
+-font-size:13px;
+-margin:21px 0 8px;}
++.site:focus-within .edit { opacity:1; }
++
++.add-site { display:flex;
++ flex-direction:column;
++ align-items:center;
++ gap:9px;
++ border:0;
++ padding:0;
++ background:transparent;
++ color:var(--ink);
++ font-size:12px; }
++
++.add-tile { display:grid;
++ place-items:center;
++ width:100%;
++ height:90px;
++ border:1px dashed var(--line);
++ border-radius:19px;
++ background:color-mix(in srgb,var(--surface) 60%,transparent);
++ font-size:34px;
++ font-weight:300; }
++
++.add-site:hover .add-tile { background:var(--soft); }
++
++.empty { color:var(--muted);
++ font-size:13px;
++ margin-top:24px; }
++
++.empty p { color:var(--ink);
++ margin:0 0 6px;
++ font-weight:600; }
++
++#status { color:var(--muted);
++ font-size:12px;
++ line-height:1.5;
++ min-height:20px;
++ margin:26px 0 0; }
++
++:root[data-layout='compact'] .links { grid-template-columns:repeat(8,minmax(0,1fr));
++ gap:18px 14px; }
++
++:root[data-layout='compact'] .monogram,
++:root[data-layout='compact'] .add-tile { height:66px;
++ border-radius:14px; }
++
++:root[data-layout='compact'] .monogram img { width:42px;
++ height:42px; }
++
++.welcome { max-width:1080px;
++ margin:24px auto 0;
++ padding:16px 40px 48px; }
++
++.welcome-intro { text-align:center; }
++
++.welcome-intro>img { width:64px;
++ height:64px; }
++
++.welcome-kicker { font-size:15px;
++ margin:16px 0 12px;
++ color:var(--muted); }
++
++.welcome h1 { font-size:clamp(36px,4.5vw,56px);
++ font-weight:500;
++ letter-spacing:-2px;
++ line-height:1.08;
++ margin:0 auto 18px;
++ max-width:560px; }
++
++.welcome-intro>p:last-child { font-size:16px;
++ margin:0;
++ color:var(--muted); }
++
++.welcome-features { display:grid;
++ grid-template-columns:repeat(3,minmax(0,1fr));
++ gap:28px;
++ margin:44px 0 34px;
++ padding:30px;
++ border-radius:24px;
++ background:color-mix(in srgb,var(--surface) 90%,transparent);
++ border:1px solid color-mix(in srgb,var(--surface) 80%,transparent); }
++
++.welcome-features h2 { font-size:16px;
++ margin:12px 0 8px;
++ font-weight:600; }
++
++.welcome-features p { color:var(--muted);
++ font-size:14px;
++ line-height:1.6;
++ margin:0; }
++
++.feature-mark { display:flex;
++ color:var(--accent); }
++
++.welcome-actions { text-align:center; }
++
++.welcome-actions .primary { min-height:46px;
++ padding:12px 24px; }
++
++.welcome-toggle { display:flex;
++ justify-content:center;
++ align-items:center;
++ gap:9px;
++ margin:22px 0 0;
++ font-size:13px; }
++
++.welcome-actions p { font-size:12px;
++ color:var(--muted);
++ margin:10px 0 0; }
++
++input[type='checkbox'] { accent-color:var(--seed);
++ width:17px;
++ height:17px; }
++
++dialog { padding:26px;
++ border:1px solid var(--line);
++ border-radius:20px;
++ background:var(--surface);
++ color:var(--ink);
++ width:min(440px,calc(100% - 32px));
++ box-shadow:0 28px 90px #0003; }
++
++dialog::backdrop { background:#0b1a3440; }
++
++.dialog-heading { display:flex;
++ align-items:center;
++ justify-content:space-between;
++ gap:12px; }
++
++.dialog-heading h2 { font-size:23px;
++ font-weight:500;
++ letter-spacing:-.5px;
++ margin:0; }
++
++.close { padding:0;
++ width:30px;
++ height:30px;
++ font-size:26px; }
++
++.dialog-copy { color:var(--muted);
++ font-size:14px;
++ margin:8px 0 24px; }
++
++dialog label { display:block;
++ font-size:13px;
++ margin:21px 0 8px; }
+ 
+ dialog input,
+-dialog select{width:100%;
+-padding:12px;
+-border:1px solid var(--line);
+-border-radius:9px;
+-background:var(--bg);
+-color:var(--ink);
+-font-size:14px;}
+-
+-.field-note{font-size:12px;
+-color:var(--muted);
+-line-height:1.5;
+-margin:18px 0;}
+-
+-.dialog-actions{display:flex;
+-justify-content:flex-end;
+-align-items:center;
+-gap:10px;
+-margin-top:25px;}
++dialog select { width:100%;
++ padding:12px;
++ border:1px solid var(--line);
++ border-radius:9px;
++ background:var(--bg);
++ color:var(--ink);
++ font-size:14px; }
++
++.field-note { font-size:12px;
++ color:var(--muted);
++ line-height:1.5;
++ margin:18px 0; }
++
++.dialog-actions { display:flex;
++ justify-content:flex-end;
++ align-items:center;
++ gap:10px;
++ margin-top:25px; }
+ 
+ .primary,
+ .secondary,
+-.danger{padding:10px 16px;
+-border-radius:9px;
+-font-size:14px;}
+-
+-.primary{color:var(--surface);
+-background:var(--accent);
+-border:1px solid var(--accent);
+-font-weight:600;}
+-
+-.secondary{background:transparent;
+-color:var(--ink);
+-border:1px solid var(--line);}
+-
+-.danger{background:transparent;
+-color:var(--error);
+-border:0;
+-padding-left:0;}
+-
+-.spacer{flex:1;}
+-
+-#link-error{color:var(--error);
+-font-size:13px;
+-min-height:16px;
+-line-height:1.5;}
+-
+-[hidden]{display:none!important;}
+-
+-/* Local color, without images or network requests. */
+-:root[data-palette='forest'] { --seed:#276b54; }
+-
+-:root[data-palette='clay'] { --seed:#a34b35; }
+-
+-:root[data-palette='violet'] { --seed:#7151a5; }
+-
+-:root[data-palette='slate'] { --seed:#526578; }
+-
+-:root[data-theme='dark'] { --accent:color-mix(in srgb,var(--seed) 45%,white); }
+-@media (prefers-color-scheme: dark) {
+-  :root:not([data-theme='light']) { --accent:color-mix(in srgb,var(--seed) 45%,white); }
+-}
+-
+-:root[data-background='mist'] body {
+-  background:radial-gradient(ellipse at 12% 8%,color-mix(in srgb,var(--seed) 14%,transparent),transparent 58%),var(--bg);
+-}
+-
+-:root[data-background='lines'] body {
+-  background:repeating-linear-gradient(125deg,transparent 0 58px,color-mix(in srgb,var(--seed) 6%,transparent) 59px 60px),var(--bg);
+-}
+-
+-:root[data-layout='compact'] .links { grid-template-columns:repeat(3,minmax(0,1fr));
+- gap:8px; }
+-
+-:root[data-layout='compact'] .site a { flex-direction:row;
+- min-height:64px;
+- padding:10px 24px 10px 8px; }
+-
+-:root[data-layout='compact'] .monogram { flex-shrink:0;
+- width:34px;
+- height:34px;
+- border-radius:10px;
++.danger { padding:10px 16px;
++ border-radius:9px;
+  font-size:14px; }
+ 
++.primary { color:var(--surface);
++ background:var(--accent);
++ border:1px solid var(--accent);
++ font-weight:600; }
++
++.secondary { background:transparent;
++ color:var(--ink);
++ border:1px solid var(--line); }
++
++.danger { background:transparent;
++ color:var(--error);
++ border:0;
++ padding-left:0; }
++
++.spacer { flex:1; }
++
++#link-error { color:var(--error);
++ font-size:13px;
++ min-height:16px;
++ line-height:1.5; }
++
+ #settings-dialog { position:fixed;
+- max-width:none;
+  inset:12px 12px 12px auto;
+  margin:0;
+-  width:min(380px,calc(100% - 24px));
++ max-width:none;
++ width:min(380px,calc(100% - 24px));
+  height:calc(100% - 24px);
+  max-height:none;
+-  padding:26px;
+  overflow:auto;
+  border-radius:18px; }
+ 
+-#settings-dialog::backdrop { background:#0b1a3422;
+- backdrop-filter:none; }
+-
+-#settings-dialog h3 { font-size:12px;
++#settings-dialog::backdrop { background:#0b1a3422; }
++
++#settings-dialog h3 { font-size:13px;
+  font-weight:600;
+- text-transform:uppercase;
+-  letter-spacing:1.2px;
+  color:var(--muted);
+  margin:24px 0 0;
+  padding-top:16px;
+@@ -408,41 +476,69 @@
+  align-items:center;
+  gap:10px; }
+ 
+-#show-links { width:17px;
+- height:17px;
+- accent-color:var(--seed); }
+-
+ #settings-dialog .dialog-actions { position:sticky;
+  bottom:-26px;
+  padding:16px 0;
+-  background:var(--surface);
++ background:var(--surface);
+  border-top:1px solid var(--line); }
++
++[hidden] { display:none!important; }
++
++.sr-only { position:absolute;
++ width:1px;
++ height:1px;
++ padding:0;
++ margin:-1px;
++ overflow:hidden;
++ clip-path:inset(50%);
++ white-space:nowrap;
++ border:0; }
++@media(max-width: 1000px) {
++  .links { grid-template-columns:repeat(5,minmax(0,1fr)); }
++  :root[data-layout='compact'] .links { grid-template-columns:repeat(6,minmax(0,1fr)); }
++}
++@media(max-width: 760px) {
++  .links { grid-template-columns:repeat(4,minmax(0,1fr));
++ gap:22px 16px; }
++  :root[data-layout='compact'] .links { grid-template-columns:repeat(4,minmax(0,1fr)); }
++  .welcome-features { gap:20px;
++ padding:24px; }
++}
+ @media(max-width: 520px) {
+-  :root[data-layout='compact'] .links { grid-template-columns:repeat(2,minmax(0,1fr)); }
++  .topbar { padding:18px; }
++  .brand { font-size:21px; }
++  .home-tools { gap:0; }
++  #customize { font-size:0;
++ padding:9px; }
++  #home { padding:0 22px 28px; }
++  .journey { padding-top:44px; }
++  #search-form { padding-left:16px;
++ gap:10px;
++ min-height:60px;
++ border-radius:18px; }
++  #search { font-size:15px; }
++  .sites { margin-top:44px; }
++  .links,
++:root[data-layout='compact'] .links { grid-template-columns:repeat(2,minmax(0,1fr));
++ gap:22px 18px; }
++  .edit { opacity:1; }
++  .welcome { margin-top:12px;
++ padding:8px 22px 30px; }
++  .welcome-features { grid-template-columns:1fr;
++ margin:28px 0;
++ gap:22px; }
++  .welcome h1 { letter-spacing:-1px; }
++  .welcome-toggle { font-size:12px; }
+   #settings-dialog { inset:0;
+  width:100%;
+  height:100%;
+  border-radius:0; }
+-}
+-
+-.sr-only{position:absolute;
+-width:1px;
+-height:1px;
+-padding:0;
+-margin:-1px;
+-overflow:hidden;
+-clip-path:inset(50%);
+-white-space:nowrap;
+-border:0;}
+-@media(max-width: 600px){.topbar{padding:22px 20px;}.topbar>.text-button{font-size:0;
+-gap:0;}.topbar>.text-button svg{width:23px;}main{padding:0 22px 28px;}.journey{padding-top:52px;}h1{letter-spacing:-1.5px;
+-font-size:39px;
+-margin-bottom:28px;}#search-form{padding-left:15px;
+-gap:10px;
+-min-height:66px;
+-border-radius:15px;}#search{font-size:15px;}.search-submit{width:40px;
+-height:40px;}.sites{margin-top:42px;}.links{grid-template-columns:repeat(3,minmax(0,1fr));
+-gap:5px;}.edit{opacity:1;}.dialog-actions{gap:8px;}.primary,
+-.secondary{padding:10px 13px;}}
+-@media(prefers-reduced-motion: no-preference){button,
+-a{transition:background-color .12s,color .12s;}.edit{transition:opacity .12s;}}
++  .dialog-actions { gap:8px; }
++  .primary,
++.secondary { padding:10px 13px; }
++}
++@media(prefers-reduced-motion: no-preference) {
++  button,
++a { transition:background-color .12s,color .12s; }
++  .edit { transition:opacity .12s; }
++}
+diff --git a/chrome/browser/resources/new_tab_page/senda_home.ts b/chrome/browser/resources/new_tab_page/senda_home.ts
+--- a/chrome/browser/resources/new_tab_page/senda_home.ts
++++ b/chrome/browser/resources/new_tab_page/senda_home.ts
+@@ -1,5 +1,5 @@
+ // Copyright 2026 Senda contributors. All rights reserved.
+-import {normalizeUrl, normalizeState, searchUrl, readState, writeState, STORAGE_KEY, editedLinkIndex} from './senda_home_state.js';
++import {normalizeUrl, normalizeState, searchUrl, readState, writeState, STORAGE_KEY, editedLinkIndex, MAX_LINKS, shouldShowWelcome, localFaviconUrl} from './senda_home_state.js';
+ import type {Preferences} from './senda_home_state.js';
+ 
+ interface Appearance {scheme: number; palette: number; editable: boolean;}
+@@ -42,6 +42,7 @@
+ const loaded = readState(storage);
+ let state = loaded.state;
+ let editing = -1;
++button('customize').disabled = !nativeReady;
+ const names = {duckduckgo: 'DuckDuckGo', google: 'Google', bing: 'Bing'};
+ function report(text: string) { $('status').textContent = text; }
+ function persist(message: string) {
+@@ -74,20 +75,44 @@
+   renderAppearance(state);
+   $('engine-name').textContent = names[state.engine];
+   $('empty').hidden = state.links.length > 0;
+-  button('add-link').disabled = state.links.length >= 12;
+-  $('add-link').title = state.links.length >= 12 ? 'Puedes guardar hasta doce accesos' : '';
++  button('add-link').disabled = state.links.length >= MAX_LINKS;
++  $('add-link').title = state.links.length >= MAX_LINKS ? 'Puedes guardar hasta 48 sitios' : '';
+   const children = state.links.map((link, index) => {
+     const tile = document.createElement('div'); tile.className = 'site';
+     const a = document.createElement('a'); a.href = link.url; a.title = link.title;
+     const icon = document.createElement('span'); icon.className = 'monogram'; icon.setAttribute('aria-hidden', 'true');
+-    icon.textContent = Array.from(link.title).slice(0, 1).join('').toLocaleUpperCase();
++    const letter = document.createElement('span'); letter.className = 'monogram-letter';
++    letter.textContent = Array.from(link.title).slice(0, 1).join('').toLocaleUpperCase();
++    icon.append(letter);
++    if (location.protocol === 'chrome:') {
++      const image = document.createElement('img'); image.alt = ''; image.width = 64; image.height = 64;
++      image.loading = 'lazy'; image.decoding = 'async'; image.referrerPolicy = 'no-referrer';
++      image.addEventListener('load', () => { icon.classList.add('has-icon'); icon.dataset['favicon'] = 'loaded'; });
++      image.addEventListener('error', () => { image.hidden = true; icon.dataset['favicon'] = 'missing'; });
++      image.src = localFaviconUrl(link.url)!;
++      icon.append(image);
++    }
+     const label = document.createElement('span'); label.className = 'site-name'; label.textContent = link.title;
+     a.append(icon, label);
+     const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'text-button edit'; edit.textContent = '⋯'; edit.setAttribute('aria-label', 'Editar ' + link.title); edit.addEventListener('click', () => openLink(index));
+     tile.append(a, edit); return tile;
+   });
+-  $('links').replaceChildren(...children);
+-}
++  $('links').replaceChildren(...children, button('add-link'));
++}
++function showWelcome(visible: boolean, focus = false) {
++  $('welcome').hidden = !visible; $('home').hidden = visible;
++  if (visible) {
++    input('welcome-hide').checked = state.hideWelcome || !state.welcomeSeen;
++    $('welcome-kicker').textContent = state.welcomeSeen ? 'Novedades de Senda' : 'Bienvenido a Senda';
++    $('welcome-heading').textContent = state.welcomeSeen ? 'Conoce tu nuevo Senda.' : 'Tu próxima ruta empieza aquí.';
++  }
++  if (focus) (visible ? $('welcome-heading') : input('search')).focus();
++}
++$('open-welcome').addEventListener('click', () => showWelcome(true, true));
++$('start-browsing').addEventListener('click', () => {
++  state = normalizeState({...state, welcomeSeen: true, hideWelcome: input('welcome-hide').checked});
++  render(); showWelcome(false, true); persist('Tu inicio está listo.');
++});
+ $('search-form').addEventListener('submit', event => {
+   event.preventDefault();
+   const url = searchUrl(input('search').value, state.engine);
+@@ -96,7 +121,8 @@
+ function settingsValue(): Preferences {
+   return normalizeState({...state, theme: select('theme').value, engine: select('engine').value,
+     palette: select('palette').value, background: select('background').value,
+-    layout: select('layout').value, showLinks: input('show-links').checked});
++    layout: select('layout').value, showLinks: input('show-links').checked,
++    hideWelcome: input('hide-welcome').checked});
+ }
+ async function readAppearance() {
+   if (!native) return;
+@@ -112,6 +138,7 @@
+   const currentOption = select('palette').querySelector<HTMLOptionElement>('option[value="custom"]')!;
+   currentOption.hidden = currentOption.disabled = state.palette !== 'custom';
+   input('show-links').checked = state.showLinks;
++  input('hide-welcome').checked = state.hideWelcome;
+   select('theme').disabled = select('palette').disabled = !nativeReady || appearance?.editable === false;
+   dialog('settings-dialog').showModal();
+ });
+@@ -120,6 +147,7 @@
+ $('settings-form').addEventListener('submit', async event => {
+   event.preventDefault();
+   const next = settingsValue();
++  if (next.hideWelcome) next.welcomeSeen = true;
+   const save = document.querySelector<HTMLButtonElement>('#settings-form button[type="submit"]')!;
+   save.disabled = true;
+   try {
+@@ -133,6 +161,7 @@
+     }
+     state = next;
+   render(); persist('Preferencias guardadas.'); dialog('settings-dialog').close();
++    showWelcome(shouldShowWelcome(state));
+   } catch { report('No se pudo aplicar la apariencia. Vuelve a intentarlo.'); }
+   finally { save.disabled = false; }
+ });
+@@ -144,7 +173,7 @@
+   if (state.links.some((link, i) => link.url === url && i !== editing)) { $('link-error').textContent = 'Ya tienes un acceso a esta dirección.'; return; }
+   const link = {title: input('link-title').value.trim().slice(0,40) || new URL(url).hostname, url};
+   if (editing >= 0) state.links[editing] = link;
+-  else if (state.links.length < 12) state.links.push(link);
++  else if (state.links.length < MAX_LINKS) state.links.push(link);
+   const savedIndex = editing >= 0 ? editing : state.links.length - 1;
+   render(); persist(editing < 0 ? 'Acceso añadido.' : 'Acceso actualizado.'); dialog('link-dialog').close();
+   focusLink(savedIndex);
+@@ -171,16 +200,21 @@
+     }
+   }
+   state = next;
+-  if (!dialog('settings-dialog').open) render();
+-});
++  if (!dialog('settings-dialog').open) { render(); showWelcome(shouldShowWelcome(state)); }
++});
++showWelcome(shouldShowWelcome(state));
+ if (location.protocol === 'chrome:') {
+   // The preview has no native dependencies. Chromium compiles this adapter separately.
+   const adapter = './senda_appearance.js';
+   import(adapter).then(async module => {
+     native = module.getAppearanceHandler() as NativeAppearance;
+     await readAppearance(); nativeReady = true;
++    button('customize').disabled = false;
+     if (appearance?.editable === false) $('appearance-note').textContent = 'La apariencia está administrada por tu organización.';
+-  }).catch(() => report('La apariencia del navegador no está disponible. Puedes personalizar el inicio.'));
++  }).catch(() => {
++    native = undefined; button('customize').disabled = false;
++    report('La apariencia del navegador no está disponible. Puedes personalizar el inicio.');
++  });
+ } else {
+   $('appearance-note').textContent = 'Vista previa: estos colores solo afectan a esta página.';
+ }
+diff --git a/chrome/browser/resources/new_tab_page/senda_home_state.ts b/chrome/browser/resources/new_tab_page/senda_home_state.ts
+--- a/chrome/browser/resources/new_tab_page/senda_home_state.ts
++++ b/chrome/browser/resources/new_tab_page/senda_home_state.ts
+@@ -5,9 +5,14 @@
+ export interface Site {title: string; url: string;}
+ export interface Preferences {
+   theme: Theme; engine: Engine; links: Site[]; palette: Palette;
+-  background: 'plain'|'mist'|'lines'; layout: 'comfortable'|'compact'; showLinks: boolean;
++  background: 'plain'|'mist'|'lines'|'folds'; layout: 'comfortable'|'compact'; showLinks: boolean;
++  welcomeSeen: boolean; hideWelcome: boolean;
+ }
+ export const STORAGE_KEY = 'senda.home.v1';
++export const MAX_LINKS = 48;
++export function shouldShowWelcome(state: Preferences): boolean {
++  return !state.hideWelcome;
++}
+ export function editedLinkIndex(before: Preferences, after: Preferences, index: number): number {
+   const url = before.links[index]?.url;
+   return url ? after.links.findIndex(link => link.url === url) : -1;
+@@ -22,15 +27,24 @@
+     return url.href;
+   } catch { return null; }
+ }
++export function localFaviconUrl(value: string): string|null {
++  const page = normalizeUrl(value);
++  if (!page) return null;
++  const url = new URL('chrome://favicon2/');
++  url.search = new URLSearchParams({size:'64',scaleFactor:'1x',forceEmptyDefaultFavicon:'1',allowGoogleServerFallback:'0',pageUrl:page}).toString();
++  return url.href;
++}
+ export function normalizeState(value: unknown): Preferences {
+   const input = (value && typeof value === 'object' ? value : {}) as Partial<Preferences>;
+   const state: Preferences = {
+     theme: input.theme === 'dark' || input.theme === 'light' ? input.theme : 'system',
+     engine: input.engine === 'google' || input.engine === 'bing' ? input.engine : 'duckduckgo',
+     palette: ['forest','clay','violet','slate','custom'].includes(input.palette || '') ? input.palette! : 'blue',
+-    background: input.background === 'plain' || input.background === 'lines' ? input.background : 'mist',
++    background: input.background === 'plain' || input.background === 'lines' || input.background === 'mist' ? input.background : 'folds',
+     layout: input.layout === 'compact' ? 'compact' : 'comfortable',
+     showLinks: input.showLinks !== false,
++    welcomeSeen: input.welcomeSeen === true,
++    hideWelcome: input.hideWelcome === true,
+     links: [],
+   };
+   if (Array.isArray(input.links)) {
+@@ -39,7 +53,7 @@
+       if (!url || state.links.some(link => link.url === url)) continue;
+       const title = typeof item.title === 'string' ? item.title.trim().slice(0, 40) : '';
+       state.links.push({title: title || new URL(url).hostname, url});
+-      if (state.links.length === 12) break;
++      if (state.links.length === MAX_LINKS) break;
+     }
+   }
+   return state;
+diff --git a/chrome/browser/resources/new_tab_page/senda_wallpaper.svg b/chrome/browser/resources/new_tab_page/senda_wallpaper.svg
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/resources/new_tab_page/senda_wallpaper.svg
+@@ -0,0 +1,13 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1200" viewBox="0 0 1920 1200" fill="none">
++  <defs>
++    <linearGradient id="sky" x2="1750" y2="1200" gradientUnits="userSpaceOnUse"><stop stop-color="#d7e6ee"/><stop offset="1" stop-color="#8fa9bb"/></linearGradient>
++    <linearGradient id="fold" x1="1150" y1="150" x2="1470" y2="1100" gradientUnits="userSpaceOnUse"><stop stop-color="#ecf4f8"/><stop offset=".42" stop-color="#bfd1de"/><stop offset=".8" stop-color="#7b98ad"/><stop offset="1" stop-color="#dce7ed"/></linearGradient>
++    <linearGradient id="edge" x1="1500" y1="450" x2="1650" y2="950" gradientUnits="userSpaceOnUse"><stop stop-color="#f4f8fa"/><stop offset=".85" stop-color="#a8c0d0"/><stop offset="1" stop-color="#647f94"/></linearGradient>
++  </defs>
++  <path fill="url(#sky)" d="M0 0h1920v1200H0z"/>
++  <path fill="#7391a5" opacity=".12" d="M1920 15C1560 235 1200 344 1140 599c-66 281 362 244 288 431-25 63-95 122-181 170h673V15Z"/>
++  <path fill="url(#fold)" d="M1920 55c-328 203-815 334-817 553-1 193 398 178 372 340-17 103-144 176-251 252h696V55Z"/>
++  <path stroke="#526e83" stroke-opacity=".18" stroke-width="6" d="M1920 338c-251 136-544 198-544 336 0 116 336 149 308 266-23 100-132 184-230 260"/>
++  <path fill="url(#edge)" d="M1920 325c-280 149-595 216-590 346 5 112 327 134 315 259-9 101-159 207-251 270h526V325Z"/>
++  <path fill="#dbe7ef" fill-opacity=".46" d="M1920 544c-186 89-388 131-387 208 2 61 196 90 205 184 8 83-71 177-151 264h333V544Z"/>
++</svg>
+diff --git a/chrome/browser/resources/new_tab_page/senda_icon.svg b/chrome/browser/resources/new_tab_page/senda_icon.svg
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/resources/new_tab_page/senda_icon.svg
+@@ -0,0 +1,7 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 64 64">
++  <defs><linearGradient id="blue" x2="64" y2="64" gradientUnits="userSpaceOnUse"><stop stop-color="#3c7bd4"/><stop offset="1" stop-color="#174593"/></linearGradient></defs>
++  <rect x="1" y="1" width="62" height="62" rx="16" fill="url(#blue)"/>
++  <path d="M44 18H29C15 18 15 34 29 34H35C46 34 46 48 35 48H20" fill="none" stroke="white" stroke-width="5.5" stroke-linecap="round"/>
++  <circle cx="44" cy="18" r="4" fill="#bce9fa"/>
++  <circle cx="20" cy="48" r="4" fill="#bce9fa"/>
++</svg>
+diff --git a/chrome/browser/resources/new_tab_page/BUILD.gn b/chrome/browser/resources/new_tab_page/BUILD.gn
+--- a/chrome/browser/resources/new_tab_page/BUILD.gn
++++ b/chrome/browser/resources/new_tab_page/BUILD.gn
+@@ -23,6 +23,8 @@
+   static_files = [
+     "new_tab_page.html",
+     "senda_home.css",
++    "senda_wallpaper.svg",
++    "senda_icon.svg",
+     "shared_vars.css",
+   ]
+ 

@@ -4,6 +4,8 @@ Navegador de desarrollo para Windows x64 basado directamente en Chromium. Priori
 
 ## Estado
 
+El inicio incorpora mosaicos para hasta 48 sitios, fondo de pliegues local y bienvenida/novedades con ocultación configurable. El icono propio de Senda está integrado en el ejecutable, los logotipos internos y Nueva pestaña. Evidencia: [validación del inicio y bienvenida](docs/validation/2026-11-16-speed-dial-welcome.md).
+
 La base de Chromium y la identidad inicial Senda están compiladas. La página de inicio incorpora búsqueda configurable y accesos editables. La personalización ofrece temas claro, oscuro y del sistema, cinco paletas que cambian también la barra y las pestañas, fondos locales y distribución de accesos cómoda o compacta. Se verificaron vista previa reversible y persistencia al reiniciar; detalles en [validación de personalización](docs/validation/2026-11-16-personalization.md). Está integrada y probada una primera capa de bloqueo nativo de solicitudes con EasyList/EasyPrivacy, con excepciones por sitio y recuperación de índice corrupto. Los valores iniciales bloquean cookies de terceros y desactivan sugerencias de búsqueda; respetan preferencias explícitas y conservan Safe Browsing habilitado. Consultar `docs/validation/build-status.json` y los informes de `docs/validation/` para distinguir funciones probadas de trabajo pendiente.
 
 El ahorro de memoria está activado inicialmente en modo equilibrado (15 minutos), con modos de 60 y 5 minutos y exclusiones nativas. Una comparación local de 14 páginas sintéticas confirmó menos memoria privada con el modo máximo, conservación de las pestañas protegidas y reactivación. No equivale a una comparación contra Chrome comercial. Evidencia y cifras: `docs/validation/2026-11-15-memory.md`.

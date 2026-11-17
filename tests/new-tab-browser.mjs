@@ -22,7 +22,7 @@ async function screenshot(file,width,height) {
 async function waitForHome() {
   const deadline=Date.now()+20000;
   while(Date.now()<deadline) {
-    try { if(await evaluate('Boolean(document.querySelector("#heading") && document.documentElement.dataset.theme)')) return; }
+    try { if(await evaluate('Boolean(document.querySelector("#heading") && document.documentElement.dataset.theme && !document.querySelector("#customize").disabled)')) return; }
     catch(error) { if(!/context|navigat/i.test(error.message)) throw error; }
     await new Promise(r=>setTimeout(r,100));
   }
@@ -40,10 +40,12 @@ try {
   session=(await cdp.send('Target.attachToTarget',{targetId:target.targetId,flatten:true})).sessionId;
   await cdp.send('Page.enable',{},session);
   await waitForHome();
+  await evaluate('if(!document.querySelector("#welcome").hidden)document.querySelector("#start-browsing").click()');
   assert.equal(await evaluate('document.querySelector("#heading").textContent'),'¿A dónde vamos?');
   await evaluate('localStorage.clear()');
   await cdp.send('Page.reload',{},session);
   await waitForHome();
+  await evaluate('if(!document.querySelector("#welcome").hidden)document.querySelector("#start-browsing").click()');
   await evaluate('document.querySelector("#customize").click()');
   await evaluate('new Promise(resolve=>{const timer=setInterval(()=>{if(document.querySelector("#settings-dialog").open){clearInterval(timer);resolve(true)}},50)})');
   await evaluate('document.querySelector("#theme").value="light";document.querySelector("#settings-form").requestSubmit()');
@@ -64,11 +66,11 @@ try {
   await evaluate('document.querySelector(".edit").click();document.querySelector("#remove-link").click()');
   assert.equal(await evaluate('document.querySelectorAll(".site").length'),0);
   assert.equal(await evaluate('document.activeElement.id'),'add-link');
-  await evaluate('for(let i=1;i<=12;i++){document.querySelector("#add-link").click();document.querySelector("#link-title").value="Sitio "+i;document.querySelector("#link-url").value="https://example.com/"+i;document.querySelector("#link-form").requestSubmit()}');
+  await evaluate('for(let i=1;i<=48;i++){document.querySelector("#add-link").click();document.querySelector("#link-title").value="Sitio "+i;document.querySelector("#link-url").value="https://example.com/"+i;document.querySelector("#link-form").requestSubmit()}');
   assert.equal(await evaluate('document.querySelector("#add-link").disabled'),true);
-  assert.equal(await evaluate('document.activeElement.getAttribute("aria-label")'),'Editar Sitio 12');
-  console.log('PASS: twelve shortcuts retain keyboard focus.');
-  await evaluate('for(let i=0;i<12;i++){document.querySelector(".edit").click();document.querySelector("#remove-link").click()}');
+  assert.equal(await evaluate('document.activeElement.getAttribute("aria-label")'),'Editar Sitio 48');
+  console.log('PASS: 48 shortcuts retain keyboard focus.');
+  await evaluate('for(let i=0;i<48;i++){document.querySelector(".edit").click();document.querySelector("#remove-link").click()}');
   await evaluate('document.querySelector("#customize").click()');
   await evaluate('new Promise(resolve=>{const timer=setInterval(()=>{if(document.querySelector("#settings-dialog").open){clearInterval(timer);resolve(true)}},50)})');
   await evaluate('document.querySelector("#theme").value="dark";document.querySelector("#settings-form").requestSubmit()');

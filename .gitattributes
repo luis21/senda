@@ -7,10 +7,12 @@
 *.ts text eol=lf
 *.html text eol=lf
 *.css text eol=lf
+*.svg text eol=lf
 *.ps1 text eol=crlf
 *.psm1 text eol=crlf
 *.patch -text
 *.png binary
+*.ico binary
 assets/filters/UnindexedRules binary
 assets/filters/CosmeticExceptions.inc text eol=lf
 .gitattributes text eol=lf

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1200" viewBox="0 0 1920 1200" fill="none">
+  <defs>
+    <linearGradient id="sky" x2="1750" y2="1200" gradientUnits="userSpaceOnUse"><stop stop-color="#d7e6ee"/><stop offset="1" stop-color="#8fa9bb"/></linearGradient>
+    <linearGradient id="fold" x1="1150" y1="150" x2="1470" y2="1100" gradientUnits="userSpaceOnUse"><stop stop-color="#ecf4f8"/><stop offset=".42" stop-color="#bfd1de"/><stop offset=".8" stop-color="#7b98ad"/><stop offset="1" stop-color="#dce7ed"/></linearGradient>
+    <linearGradient id="edge" x1="1500" y1="450" x2="1650" y2="950" gradientUnits="userSpaceOnUse"><stop stop-color="#f4f8fa"/><stop offset=".85" stop-color="#a8c0d0"/><stop offset="1" stop-color="#647f94"/></linearGradient>
+  </defs>
+  <path fill="url(#sky)" d="M0 0h1920v1200H0z"/>
+  <path fill="#7391a5" opacity=".12" d="M1920 15C1560 235 1200 344 1140 599c-66 281 362 244 288 431-25 63-95 122-181 170h673V15Z"/>
+  <path fill="url(#fold)" d="M1920 55c-328 203-815 334-817 553-1 193 398 178 372 340-17 103-144 176-251 252h696V55Z"/>
+  <path stroke="#526e83" stroke-opacity=".18" stroke-width="6" d="M1920 338c-251 136-544 198-544 336 0 116 336 149 308 266-23 100-132 184-230 260"/>
+  <path fill="url(#edge)" d="M1920 325c-280 149-595 216-590 346 5 112 327 134 315 259-9 101-159 207-251 270h526V325Z"/>
+  <path fill="#dbe7ef" fill-opacity=".46" d="M1920 544c-186 89-388 131-387 208 2 61 196 90 205 184 8 83-71 177-151 264h333V544Z"/>
+</svg>

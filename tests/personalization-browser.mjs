@@ -18,6 +18,7 @@ async function until(expression) {
   throw Error('Timeout: '+expression);
 }
 async function open() {
+  await until(`!document.querySelector('#customize').disabled`);
   await run(`document.querySelector('#customize').click()`);
   await until(`document.querySelector('#settings-dialog').open`);
 }
@@ -32,6 +33,7 @@ try {
   assert.ok(target);
   session=(await cdp.send('Target.attachToTarget',{targetId:target.targetId,flatten:true})).sessionId;
   await until(`Boolean(document.querySelector('#palette'))`);
+  await run(`if(!document.querySelector('#welcome').hidden)document.querySelector('#start-browsing').click()`);
   await run(`(async()=>{window.appearanceHandler=(await import('./senda_appearance.js')).getAppearanceHandler();return true})()`);
   const get=()=>run(`import('./senda_appearance.js').then(m=>m.getAppearanceHandler().getSendaAppearance())`);
   if(process.argv.includes('--device')) {

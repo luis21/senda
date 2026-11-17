@@ -11,33 +11,42 @@
 <body>
   <header class="topbar">
     <a class="brand" href="#search" aria-label="Senda, ir al buscador">
-      <svg viewBox="0 0 40 40" aria-hidden="true"><path d="M29 8H18a8 8 0 0 0 0 16h4a4 4 0 0 1 0 8H11"/><circle cx="29" cy="8" r="3"/><circle cx="11" cy="32" r="3"/></svg>
+      <img class="brand-icon" src="senda_icon.svg" width="36" height="36" alt="">
       <span>Senda</span>
     </a>
-    <button id="customize" class="text-button" type="button" aria-haspopup="dialog">
+    <nav class="home-tools" aria-label="Opciones de inicio"><button id="open-welcome" class="text-button" type="button">Novedades</button>
+    <button id="customize" class="text-button" type="button" aria-haspopup="dialog" disabled>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16M9 4v6m6 4v6"/></svg>
       Personalizar
-    </button>
+    </button></nav>
   </header>
-  <main>
+  <main id="home" hidden>
     <section class="journey" aria-labelledby="heading">
-      <p class="intro">Un nuevo comienzo.</p>
-      <h1 id="heading">¿A dónde vamos?</h1>
+      <h1 id="heading" class="sr-only">¿A dónde vamos?</h1>
       <form id="search-form" role="search">
         <label for="search" class="sr-only">Buscar en la web</label>
         <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>
-        <input id="search" type="search" placeholder="Busca algo que te inspire" autocomplete="off" spellcheck="false" required>
+        <input id="search" type="search" placeholder="Busca en la web" autocomplete="off" spellcheck="false" required>
         <button class="search-submit" type="submit" aria-label="Buscar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button>
       </form>
       <p class="engine-note">Buscar con <span id="engine-name">DuckDuckGo</span></p>
     </section>
     <section id="sites" class="sites" aria-labelledby="sites-heading">
-      <div class="section-heading"><h2 id="sites-heading">Tus sitios</h2><button id="add-link" class="text-button" type="button" aria-haspopup="dialog">+ Añadir acceso</button></div>
-      <div id="links" class="links"></div>
-      <div id="empty" class="empty"><span class="empty-symbol" aria-hidden="true">↗</span><p>Lo que visitas, más cerca.</p><span>Añade tus sitios favoritos para tenerlos a mano.</span></div>
+      <h2 id="sites-heading" class="sr-only">Tus sitios</h2>
+      <div id="links" class="links"><button id="add-link" class="add-site" type="button" aria-haspopup="dialog"><span class="add-tile" aria-hidden="true">+</span><span>Añadir un sitio</span></button></div>
+      <div id="empty" class="empty"><p>Tu web, a un clic.</p><span>Añade tus sitios para crear tu propio inicio.</span></div>
     </section>
     <p id="status" role="status" aria-live="polite"></p>
   </main>
+  <section id="welcome" class="welcome" aria-labelledby="welcome-heading" hidden>
+    <div class="welcome-intro"><img src="senda_icon.svg" width="72" height="72" alt=""><p id="welcome-kicker" class="welcome-kicker">Bienvenido a Senda</p><h1 id="welcome-heading" tabindex="-1">Tu próxima ruta empieza aquí.</h1><p>Un inicio a tu manera, con menos distracciones.</p></div>
+    <div class="welcome-features">
+      <article><span class="feature-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><path d="M14 17h7m-3.5-3.5v7"/></svg></span><h2>Tu web, más cerca</h2><p>Mosaicos para tus sitios, fondos y cinco paletas para el inicio, la barra y las pestañas.</p></article>
+      <article><span class="feature-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 4-5 7-8 9-3-2-8-5-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></svg></span><h2>Protección integrada</h2><p>Bloqueo de anuncios y rastreadores con controles por sitio, sin instalar una extensión.</p></article>
+      <article><span class="feature-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9 1v4m6-4v4M9 19v4m6-4v4M1 9h4m-4 6h4m14-6h4m-4 6h4"/></svg></span><h2>Espacio para lo que usas</h2><p>El ahorro de memoria libera pestañas inactivas y conserva las que necesitan seguir trabajando.</p></article>
+    </div>
+    <div class="welcome-actions"><button id="start-browsing" class="primary" type="button">Empezar a navegar</button><label class="welcome-toggle"><input id="welcome-hide" type="checkbox" checked> Ocultar bienvenida y novedades</label><p>Siempre puedes volver desde «Novedades».</p></div>
+  </section>
   <dialog id="settings-dialog" aria-labelledby="settings-heading">
     <form id="settings-form">
       <div class="dialog-heading"><h2 id="settings-heading">A tu manera</h2><button class="close text-button" type="button" data-close="settings-dialog" aria-label="Cerrar personalización">×</button></div>
@@ -48,9 +57,10 @@
       <div class="palette-sample" aria-hidden="true"><span></span><span></span><span></span></div>
       <p id="appearance-note" class="field-note">El color y la apariencia se aplican a la barra y las pestañas al guardar.</p>
       <h3>Página de inicio</h3>
-      <label for="background">Fondo</label><select id="background"><option value="plain">Liso</option><option value="mist">Bruma de color</option><option value="lines">Líneas suaves</option></select>
+      <label for="background">Fondo</label><select id="background"><option value="folds">Pliegues</option><option value="plain">Liso</option><option value="mist">Bruma de color</option><option value="lines">Líneas suaves</option></select>
       <label for="layout">Distribución de accesos</label><select id="layout"><option value="comfortable">Cómoda</option><option value="compact">Compacta</option></select>
       <label class="check-label"><input id="show-links" type="checkbox"> Mostrar mis sitios</label>
+      <label class="check-label"><input id="hide-welcome" type="checkbox"> Ocultar bienvenida y novedades</label>
       <label for="engine">Buscador de esta página</label><select id="engine"><option value="duckduckgo">DuckDuckGo</option><option value="google">Google</option><option value="bing">Bing</option></select>
       <p class="field-note">Tus preferencias se guardan en este perfil.</p>
       <div class="dialog-actions"><button type="button" class="secondary" data-close="settings-dialog">Cancelar</button><button type="submit" class="primary">Guardar</button></div>
