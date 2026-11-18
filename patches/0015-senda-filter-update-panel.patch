@@ -1,0 +1,201 @@
+diff --git a/chrome/browser/ui/views/content_setting_bubble_contents.h b/chrome/browser/ui/views/content_setting_bubble_contents.h
+--- a/chrome/browser/ui/views/content_setting_bubble_contents.h
++++ b/chrome/browser/ui/views/content_setting_bubble_contents.h
+@@ -9,6 +9,7 @@
+ #include <string>
+ 
+ #include "base/memory/raw_ptr.h"
++#include "base/callback_list.h"
+ #include "base/memory/weak_ptr.h"
+ #include "chrome/browser/ui/content_settings/content_setting_bubble_model.h"
+ #include "content/public/browser/web_contents_observer.h"
+@@ -21,7 +22,10 @@
+ class Combobox;
+ class RadioButton;
+ class LabelButton;
++class Label;
++class MdTextButton;
+ }  // namespace views
++namespace subresource_filter { class SendaFilterUpdater; }
+ 
+ // ContentSettingBubbleContents is used when the user turns on different kinds
+ // of content blocking (e.g. "block images").  When viewing a page with blocked
+@@ -93,6 +97,10 @@
+   // Create the extra view for this dialog, which contains any subset of: a
+   // "learn more" button and a "manage" button.
+   std::unique_ptr<View> CreateHelpAndManageView();
++  std::unique_ptr<views::View> CreateSendaListControls();
++  void RefreshSendaLists();
++  void OnSendaAutomaticChanged();
++  void OnSendaCheckNow();
+ 
+   void LinkClicked(int row, const ui::Event& event);
+   void CustomLinkClicked();
+@@ -114,6 +122,13 @@
+   RadioGroup radio_group_;
+   raw_ptr<views::LabelButton, DanglingUntriaged> manage_button_ = nullptr;
+   raw_ptr<views::Checkbox, DanglingUntriaged> manage_checkbox_ = nullptr;
++  base::WeakPtr<subresource_filter::SendaFilterUpdater> senda_updater_;
++  base::CallbackListSubscription senda_updates_subscription_;
++  raw_ptr<views::Checkbox> senda_automatic_ = nullptr;
++  raw_ptr<views::MdTextButton> senda_check_ = nullptr;
++  raw_ptr<views::Label> senda_versions_ = nullptr;
++  raw_ptr<views::Label> senda_last_check_ = nullptr;
++  raw_ptr<views::Label> senda_result_ = nullptr;
+ 
+   base::WeakPtrFactory<ContentSettingBubbleContents> weak_factory_;
+ };
+diff --git a/chrome/browser/ui/views/content_setting_bubble_contents.cc b/chrome/browser/ui/views/content_setting_bubble_contents.cc
+--- a/chrome/browser/ui/views/content_setting_bubble_contents.cc
++++ b/chrome/browser/ui/views/content_setting_bubble_contents.cc
+@@ -10,8 +10,11 @@
+ #include <vector>
+ 
+ #include "base/memory/raw_ptr.h"
++#include "base/i18n/time_formatting.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "chrome/browser/favicon/favicon_service_factory.h"
++#include "chrome/browser/browser_process.h"
++#include "chrome/browser/subresource_filter/senda_filter_updater.h"
+ #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/ui/color/chrome_color_id.h"
+@@ -51,6 +54,7 @@
+ #include "ui/views/controls/scroll_view.h"
+ #include "ui/views/controls/separator.h"
+ #include "ui/views/layout/box_layout.h"
++#include "ui/views/layout/box_layout_view.h"
+ #include "ui/views/layout/table_layout.h"
+ #include "ui/views/view_class_properties.h"
+ 
+@@ -386,12 +390,20 @@
+ }
+ 
+ ContentSettingBubbleContents::~ContentSettingBubbleContents() {
++  senda_updates_subscription_ = {};
++  senda_automatic_ = nullptr;
++  senda_check_ = nullptr;
++  senda_versions_ = nullptr;
++  senda_last_check_ = nullptr;
++  senda_result_ = nullptr;
+   // Must remove the children here so the comboboxes get destroyed before
+   // their associated models.
+   RemoveAllChildViews();
+ }
+ 
+ void ContentSettingBubbleContents::WindowClosing() {
++  senda_updates_subscription_ = {};
++  senda_updater_.reset();
+   if (content_setting_bubble_model_) {
+     content_setting_bubble_model_->CommitChanges();
+   }
+@@ -551,6 +563,12 @@
+     rows.push_back({std::move(manage_checkbox), LayoutRowType::DEFAULT});
+   }
+ 
++  if (content_setting_bubble_model_->AsSubresourceFilterBubbleModel() &&
++      g_browser_process && g_browser_process->senda_filter_updater()) {
++    rows.push_back({std::make_unique<views::Separator>(), LayoutRowType::DEFAULT});
++    rows.push_back({CreateSendaListControls(), LayoutRowType::DEFAULT});
++  }
++
+   if (std::optional<std::u16string> explanation =
+           GetSubAppsPermissionExplanation(web_contents())) {
+     auto custom_label = std::make_unique<views::Label>(
+@@ -611,6 +629,83 @@
+   }
+ 
+   content_setting_bubble_model_->set_owner(this);
++}
++
++std::unique_ptr<views::View> ContentSettingBubbleContents::CreateSendaListControls() {
++  senda_updater_ = g_browser_process->senda_filter_updater()->GetWeakPtr();
++  auto column = std::make_unique<views::BoxLayoutView>();
++  column->SetOrientation(views::BoxLayout::Orientation::kVertical);
++  column->SetCrossAxisAlignment(views::BoxLayout::CrossAxisAlignment::kStretch);
++  column->SetBetweenChildSpacing(8);
++  auto label = [&](std::u16string text, bool heading = false) {
++    auto view = std::make_unique<views::Label>(text, views::style::CONTEXT_LABEL,
++        heading ? views::style::STYLE_BODY_3_EMPHASIS : views::style::STYLE_BODY_3);
++    view->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++    view->SetMultiLine(true);
++    return column->AddChildView(std::move(view));
++  };
++  label(u"Listas de protección", true);
++  label(u"Para todos los perfiles. Las listas nuevas se aplican al abrir o recargar una página.");
++  senda_automatic_ = column->AddChildView(std::make_unique<views::Checkbox>(
++      u"Actualizar listas automáticamente", base::BindRepeating(
++          &ContentSettingBubbleContents::OnSendaAutomaticChanged, weak_factory_.GetWeakPtr())));
++  senda_automatic_->SetMultiLine(true);
++  senda_versions_ = label(u"");
++  senda_last_check_ = label(u"");
++  senda_result_ = label(u"");
++  senda_check_ = column->AddChildView(std::make_unique<views::MdTextButton>(
++      base::BindRepeating(&ContentSettingBubbleContents::OnSendaCheckNow,
++          weak_factory_.GetWeakPtr()), u"Buscar actualizaciones"));
++  senda_check_->SetStyle(ui::ButtonStyle::kTonal);
++  senda_updates_subscription_ = senda_updater_->Observe(base::BindRepeating(
++      &ContentSettingBubbleContents::RefreshSendaLists, weak_factory_.GetWeakPtr()));
++  RefreshSendaLists();
++  return column;
++}
++void ContentSettingBubbleContents::OnSendaAutomaticChanged() {
++  if (senda_updater_) { senda_updater_->SetAutomaticUpdates(senda_automatic_->GetChecked()); }
++}
++void ContentSettingBubbleContents::OnSendaCheckNow() {
++  if (senda_updater_) { senda_updater_->CheckNow(); }
++}
++void ContentSettingBubbleContents::RefreshSendaLists() {
++  if (!senda_updater_ || !senda_automatic_) { return; }
++  const auto status = senda_updater_->GetStatus();
++  senda_automatic_->SetChecked(status.automatic);
++  const bool busy = status.phase != subresource_filter::FilterUpdatePhase::kIdle;
++  senda_check_->SetEnabled(!busy);
++  auto version = [](std::string_view code) -> std::u16string {
++    if (code.size() != 12) { return u"No disponible"; }
++    return base::UTF8ToUTF16(std::string(code.substr(0, 4)) + "-" +
++        std::string(code.substr(4, 2)) + "-" + std::string(code.substr(6, 2)) +
++        " " + std::string(code.substr(8, 2)) + ":" + std::string(code.substr(10, 2)) + " UTC");
++  };
++  senda_versions_->SetText(u"EasyList: " + version(status.versions[0]) +
++                           u"\nEasyPrivacy: " + version(status.versions[1]));
++  senda_last_check_->SetText(status.last_check.is_null() ? u"Sin comprobaciones todavía" :
++      u"Última comprobación: " + base::TimeFormatShortDateAndTime(status.last_check));
++  std::u16string result;
++  if (status.phase == subresource_filter::FilterUpdatePhase::kLoading) {
++    result = u"Preparando listas…";
++  } else if (busy) {
++    result = u"Comprobando listas…";
++  } else {
++    switch (status.outcome) {
++      case subresource_filter::FilterUpdateOutcome::kNone:
++        result = u"Las listas incluidas protegen sin conexión."; break;
++      case subresource_filter::FilterUpdateOutcome::kUnchanged:
++        result = u"Las listas ya están actualizadas."; break;
++      case subresource_filter::FilterUpdateOutcome::kUpdated:
++        result = u"Listas actualizadas."; break;
++      case subresource_filter::FilterUpdateOutcome::kError:
++        result = status.persistence_error ?
++            u"Las listas activas no pudieron guardarse. Se reintentará la actualización." :
++            u"No se pudo actualizar. Se conserva la versión anterior."; break;
++    }
++  }
++  senda_result_->SetText(result);
++  PreferredSizeChanged();
++  if (GetWidget() && !GetWidget()->IsClosed()) { SizeToContents(); }
+ }
+ 
+ std::unique_ptr<views::View>
+diff --git a/chrome/browser/ui/views/BUILD.gn b/chrome/browser/ui/views/BUILD.gn
+--- a/chrome/browser/ui/views/BUILD.gn
++++ b/chrome/browser/ui/views/BUILD.gn
+@@ -1078,6 +1078,9 @@
+     "//ui/views",
+   ]
+   deps = [
++    "//base:i18n",
++    "//chrome/browser:browser_process",
++    "//chrome/browser/subresource_filter:senda_filter_updater",
+     ":content_setting_site_row_view",
+     ":layout_provider",
+     ":sub_apps_permission_explanation",

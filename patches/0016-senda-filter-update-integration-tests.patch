@@ -1,0 +1,53 @@
+diff --git a/components/subresource_filter/tools/rule_parser/senda_filter_official_unittest.cc b/components/subresource_filter/tools/rule_parser/senda_filter_official_unittest.cc
+--- a/components/subresource_filter/tools/rule_parser/senda_filter_official_unittest.cc
++++ b/components/subresource_filter/tools/rule_parser/senda_filter_official_unittest.cc
+@@ -6,6 +6,9 @@
+ #include "base/files/file_util.h"
+ #include "base/files/scoped_temp_dir.h"
+ #include "base/time/time.h"
++#include "base/strings/string_number_conversions.h"
++#include "chrome/browser/subresource_filter/senda_filter_store.h"
++#include "crypto/hash.h"
+ #include "components/subresource_filter/core/common/indexed_ruleset.h"
+ #include "components/subresource_filter/core/common/unindexed_ruleset.h"
+ #include "components/subresource_filter/core/common/senda_ruleset_validator.h"
+@@ -49,6 +52,39 @@
+   EXPECT_EQ(encoded.size(), static_cast<size_t>(reader.num_bytes_read()));
+   index.Finish();
+   EXPECT_TRUE(IndexedRulesetMatcher::Verify(index.data(), index.GetChecksum(), "Senda.Test"));
++  if (args->HasSwitch("senda-bundled-rules")) {
++    std::string bundled;
++    ASSERT_TRUE(base::ReadFileToString(args->GetSwitchValuePath("senda-bundled-rules"), &bundled));
++    EXPECT_TRUE(ValidateSendaUnindexedRuleset(base::as_byte_span(bundled)));
++  }
++  // Test-only cache seeding. Production keeps its fixed HTTPS endpoints.
++  if (args->HasSwitch("senda-seed-profile")) {
++    const auto profile = args->GetSwitchValuePath("senda-seed-profile");
++    ASSERT_TRUE(profile.IsAbsolute());
++    ASSERT_TRUE(profile.BaseName().MaybeAsASCII().starts_with("compatibility-filter-updates-"));
++    ASSERT_EQ(FILE_PATH_LITERAL(".profiles"), profile.DirName().BaseName().value());
++    SendaFilterStore store(profile.AppendASCII("SendaFilterLists"));
++    const auto staging = store.CreateStagingDirectory();
++    ASSERT_FALSE(staging.empty());
++    ASSERT_TRUE(base::CopyFile(args->GetSwitchValuePath("senda-easylist"), staging.AppendASCII("easylist.txt")));
++    ASSERT_TRUE(base::CopyFile(args->GetSwitchValuePath("senda-easyprivacy"), staging.AppendASCII("easyprivacy.txt")));
++    ASSERT_TRUE(base::CopyFile(output, staging.AppendASCII("UnindexedRules")));
++    ASSERT_TRUE(base::CopyFile(args->GetSwitchValuePath("senda-license"), staging.AppendASCII("LICENSE")));
++    std::string license;
++    ASSERT_TRUE(base::ReadFileToString(staging.AppendASCII("LICENSE"), &license));
++    GenerationManifest manifest;
++    manifest.ruleset_sha256 = result.ruleset_sha256;
++    manifest.license_sha256 = base::HexEncodeLower(crypto::hash::Sha256(license));
++    manifest.ruleset_bytes = encoded.size();
++    for (size_t i = 0; i < 2; ++i) {
++      manifest.sources[i].version = result.versions[i];
++      manifest.sources[i].sha256 = result.source_hashes[i];
++    }
++    auto staged = store.Stage(std::move(manifest), staging);
++    ASSERT_TRUE(staged.generation);
++    ASSERT_TRUE(store.CommitActive(staged.generation->id));
++    std::cout << "SENDA_SEEDED " << staged.generation->id << std::endl;
++  }
+   std::cout << "SENDA_COMPILER network=" << result.network_rules
+             << " cosmetic=" << result.cosmetic_rules
+             << " bytes=" << encoded.size()

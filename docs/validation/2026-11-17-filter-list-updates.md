@@ -46,3 +46,12 @@ El coordinador descarga ambas URLs oficiales secuencialmente, usa validadores HT
 - 19 pruebas Python pasan. El bootstrap recibe versiones/licencia desde un include generado únicamente durante la preparación de la copia de respaldo; las descargas de ejecución siguen siendo datos y no generan C++ ni usan Python.
 - Los objetos de conexión de arranque, preferencias, proceso de utilidad y servicio de reglas compilaron. El cliente del proceso espera su terminación antes de validar/indexar la salida; su comprobación real con sandbox sigue pendiente de la compilación completa en tarea 6.
 - El parche 0014 se aplica sobre los trece anteriores. La comparación global con el checkout se repetirá al exportar también el panel que se está implementando.
+
+## Panel y verificación conjunta — 18 de noviembre
+
+El panel incorpora controles globales independientes de la excepción por sitio: actualización automática, búsqueda manual, versiones de ambas listas, última comprobación y resultado. El botón se desactiva durante una operación; la suscripción se libera al cerrar el panel. Su objeto C++ compila. La revisión visual y de interacción todavía está pendiente.
+
+- Replay de 15 parches: PASS, 122 archivos coinciden con el checkout. Se corrigió la codificación UTF-8 de textos españoles durante la exportación de parches.
+- Ejecución conjunta: 40/40 pruebas nativas PASS, con las fuentes completas vendorizadas y validación adicional de la copia binaria incluida.
+- Preparación de caché por el ejecutable de pruebas: PASS. Solo admite perfiles con nombre `compatibility-filter-updates-*` bajo `.profiles`; no añade endpoints alternativos al navegador.
+- `tests/filter-updates-browser.mjs` prepara una generación sintética y comprueba su sustitución desde las URLs oficiales, coherencia de pestañas antiguas, reinicio y recuperación tras corrupción. La ejecución completa requiere terminar la nueva compilación del navegador.

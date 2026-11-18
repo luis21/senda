@@ -1208,7 +1208,7 @@ new file mode 100644
 +  canceled_ = false;
 +  pending_ = std::move(done);
 +  remote_ = content::ServiceProcessHost::Launch<senda::mojom::FilterCompiler>(
-+      content::ServiceProcessHost::Options().WithDisplayName(u"Listas de protecciÃ³n de Senda")
++      content::ServiceProcessHost::Options().WithDisplayName(u"Listas de protección de Senda")
 +          .WithProcessCallback(base::BindOnce(
 +              [](base::WeakPtr<SendaFilterCompilerProcess> self, uint64_t job,
 +                 const base::Process& process) {
