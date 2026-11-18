@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-18-windows-installer-design.md`.
 
+**Cambio de alcance aprobado por Luis:** entregar primero el instalador personal Dev para su PC. `-PersonalDev` permite CRT Debug y marca el paquete como no redistribuible. La entrega Release independiente queda pendiente; no se utiliza una salida incompleta.
+
 ## Global Constraints
 
 - Revisión Chromium y parches fijados; cuatro tareas; salidas Dev y Release separadas.
@@ -31,8 +33,8 @@
 
 **Interfaces:** `collect_payload(output_dir, runtime_deps, allow_debug=False)` devuelve rutas relativas y hashes. `validate_build(output_dir, project_root, allow_debug=False)` comprueba sello, revisión, parches y argumentos GN.
 
-- [ ] Añadir pruebas negativas de rutas externas, enlaces, archivos faltantes, símbolos, sello incompleto, CRT Debug y escape de `$`/comillas; observar RED.
-- [ ] Implementar validación y generación de manifiesto/includes NSIS; confirmar GREEN.
+- [x] Añadir pruebas negativas de rutas externas, enlaces, archivos faltantes, símbolos, sello incompleto, CRT Debug y escape de `$`/comillas; observar RED.
+- [x] Implementar validación y generación de manifiesto/includes NSIS; confirmar GREEN.
 - [ ] Compilar `Build-Senda.ps1 -Configuration Release -Jobs 4`; vigilar espacio y no lanzar binarios incompletos.
 
 ### Task 2: Instalación, desinstalación y entrega
@@ -41,7 +43,8 @@
 
 **Interfaces:** `Build-SendaInstaller.ps1` produce `dist/SendaSetup-<version>-win-x64.exe` y manifiesto SHA-256; `-TestMode` usa identidad de instalación aislada. `Test-SendaInstaller.ps1` comprueba instalación, lanzamiento y conservación de datos.
 
-- [ ] Crear script NSIS con marca de propiedad, comprobación de destino, accesos, registro de desinstalación y borrado explícito de archivos propios.
-- [ ] Generar instalador de verificación y probar integridad de archivos, lanzamiento y bloqueo nativo desde el destino.
-- [ ] Probar desinstalación preservando perfil y archivo ajeno; comprobar ausencia de CRT Debug y dependencias del checkout.
-- [ ] Revisión independiente final limitada al instalador, resolver hallazgos importantes con regresiones, documentar límites y entregar artefacto/hashes. Subir código a la rama autorizada; no publicar una release ni subir artefactos grandes a Git.
+- [x] Crear script NSIS con marca de propiedad, comprobación de destino, accesos, registro de desinstalación y borrado explícito de archivos propios.
+- [x] Generar el instalador personal solicitado y probar integridad de archivos, lanzamiento y bloqueo nativo desde el destino.
+- [x] Probar desinstalación normal preservando perfil y archivo ajeno; comprobar que CRT Debug se carga localmente y no se depende del checkout/Visual Studio. En Release sigue pendiente exigir ausencia de CRT Debug.
+- [x] Intentar la revisión independiente: el agente no arrancó por límite de uso; documentar esa limitación sin afirmar una revisión inexistente. Corregir el fallo LPAC encontrado en ejecución con regresión RED→GREEN y prueba completa del artefacto.
+- [x] Documentar límites y entregar EXE/hashes personales; conservar binarios fuera de Git. Mantener la rama existente autorizada; no crear publicación ni PR no solicitado.

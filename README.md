@@ -22,6 +22,14 @@ Siguen pendientes ampliar las pruebas de compatibilidad y extensiones, la compar
 
 ## Abrir la compilación
 
+Para crear el instalador personal de pruebas con la compilación Dev ya verificada:
+
+```powershell
+./tools/Build-SendaInstaller.ps1 -PersonalDev
+```
+
+Genera el `.exe`, SHA-256 y manifiesto en `dist/`. Usa dependencias Debug solo para pruebas en el equipo del propietario; no es redistribuible. Sin `-PersonalDev`, el comando exige una compilación Release completa. [Validación del instalador](docs/validation/2026-11-18-installer.md).
+
 Desde la raíz del proyecto, cuando la compilación esté aprobada:
 
 ```powershell

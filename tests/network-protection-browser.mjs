@@ -1,5 +1,5 @@
 import http from 'node:http';
-import {spawn} from 'node:child_process';
+import {spawn,execFileSync} from 'node:child_process';
 import {readFile,writeFile,mkdir,readdir,rm} from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -75,7 +75,11 @@ if(prepareAllow || customPrivacy) {
   }
   await writeFile(path.join(profile,'Default/Preferences'),JSON.stringify(preferences));
 }
-const browser=spawn(path.join(root,'.chromium/src/out/SendaDev',process.argv.includes('--senda-exe')?'senda.exe':'chrome.exe'),[
+const browserOption=process.argv.find(arg=>arg.startsWith('--browser-exe='));
+const browserPath=browserOption?path.resolve(browserOption.slice('--browser-exe='.length)):
+  path.join(root,'.chromium/src/out/SendaDev',process.argv.includes('--senda-exe')?'senda.exe':'chrome.exe');
+const browser=spawn(browserPath,[
+  ...(browserOption?['--enable-logging',`--log-file=${path.join(profile,'installed-browser.log')}`]:[]),
   ...(process.argv.includes('--headed')?[]:['--headless']),`--user-data-dir=${profile}`,'--remote-debugging-port=0','--no-first-run','--no-default-browser-check','--no-proxy-server',
   '--host-resolver-rules=MAP *.senda.test 127.0.0.1, MAP ad.doubleclick.net 127.0.0.1, MAP dez.ro 127.0.0.1, MAP sub.dez.ro 127.0.0.1, MAP anagram-solver.io 127.0.0.1', `http://site.senda.test:${port}/page`,
 ],{windowsHide:!process.argv.includes('--headed'),stdio:'ignore'});
@@ -213,6 +217,12 @@ try {
     assert.equal(values['search.suggest_enabled'],customPrivacy);
     assert.equal(values['safebrowsing.enabled'],true);
     console.log('PASS: '+(customPrivacy?'explicit privacy preferences respected':'privacy defaults configured')+', Safe Browsing retained.');
+  }
+  if(browserOption) {
+    const modules=execFileSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',
+      path.join(root,'tests/helpers/check-installed-runtime.ps1'),'-BrowserProcessId',String(browser.pid),
+      '-InstallDirectory',path.dirname(browserPath)],{encoding:'utf8',windowsHide:true,timeout:30000});
+    console.log(modules.trim());
   }
   if(process.argv.includes('--inspect-panel')) {
     console.log('READY: dedicated test browser available for native panel inspection.');

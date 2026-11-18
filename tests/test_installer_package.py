@@ -97,6 +97,45 @@ class InstallerPackageTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             package.nsis_escape('file\nDelete user-data')
 
+    def test_generated_includes_install_and_remove_only_manifest_files(self):
+        files = package.collect_payload(self.output, self.names)
+        generated = self.root / 'generated'
+        package.write_package_files(files, generated, {'version': '156.0.8078.80', 'revision': 'a' * 40})
+        install = (generated / 'payload-install.nsh').read_text(encoding='utf-8-sig')
+        remove = (generated / 'payload-remove.nsh').read_text(encoding='utf-8-sig')
+        locks = (generated / 'payload-locks.nsh').read_text(encoding='utf-8-sig')
+        self.assertIn('SetOutPath "$INSTDIR\\locales"', install)
+        self.assertIn('Delete "$INSTDIR\\locales\\en-US.pak"', remove)
+        self.assertNotIn('/r', remove.lower())
+        self.assertIn('!insertmacro CheckUnlocked "$INSTDIR\\chrome.dll"', locks)
+        manifest = json.loads((generated / 'package-manifest.json').read_text())
+        self.assertEqual(len(files), len(manifest['files']))
+        self.assertTrue(all('source' not in item for item in manifest['files']))
+
+    def test_windows_reserved_and_control_names_are_rejected(self):
+        for relative in ['locales/CON.txt', 'AUX', 'trailing. /x', 'a\tb']:
+            with self.subTest(relative=relative), self.assertRaises(ValueError):
+                package.write_package_files([{'relative': relative, 'source': str(self.output / 'chrome.exe'),
+                                              'size': 1, 'sha256': 'a' * 64}], self.root / 'gen', {})
+
+    def test_directory_links_outside_output_are_rejected(self):
+        external = self.root / 'external'
+        external.mkdir()
+        (external / 'secret.dat').write_bytes(b'outside')
+        link = self.output / 'linked'
+        try:
+            link.symlink_to(external, target_is_directory=True)
+        except OSError:
+            self.skipTest('Directory symlinks unavailable to this Windows token')
+        with self.assertRaises(ValueError):
+            package.collect_payload(self.output, ['linked'])
+
+    def test_generator_rejects_instruction_injection_in_destinations(self):
+        for relative in ['../outside.dll', 'bad\"name.dll', 'locales/../chrome.exe', 'C:/foreign.dll', 'file:stream', 'a\nb']:
+            with self.subTest(relative=relative), self.assertRaises(ValueError):
+                package.write_package_files([{'relative': relative, 'source': str(self.output / 'chrome.exe'),
+                                              'size': 1, 'sha256': 'a' * 64}], self.root / 'gen', {})
+
 
 if __name__ == '__main__':
     unittest.main()

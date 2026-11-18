@@ -2,6 +2,8 @@
 
 Luis pidió terminar las actualizaciones de listas y crear el instalador. Se construirá una versión Release independiente de Visual Studio. La elección Release es una decisión del implementador: la compilación Dev existente utiliza CRT de depuración no redistribuible. Se ofreció como alternativa un paquete estrictamente de pruebas; mientras no se indique lo contrario se prepara el instalador independiente.
 
+Actualización autorizada por Luis: «Crear primero el instalador de pruebas para mi PC». La primera entrega usa `-PersonalDev`, identidad de instalación separada y marca `redistributable: false`. Incluye las dependencias Debug solo para pruebas en el equipo del propietario, conserva el perfil y no se presenta como instalador Release para distribución. La compilación Release y su validación quedan como alcance posterior.
+
 - Chromium fijado en `config/chromium.json`, parches actuales y cuatro tareas. Salida separada `out/SendaRelease`, sin modificar la compilación Dev.
 - Release no oficial, sin símbolos, PGO ni ThinLTO; no representa una versión pública estable ni dispone de certificado de firma.
 - Empaquetado NSIS Unicode, por usuario, Windows x64, nombre e icono Senda. Directorio inicial `%LOCALAPPDATA%/Programs/Senda`; accesos al menú Inicio y escritorio opcional. No fuerza el navegador predeterminado.

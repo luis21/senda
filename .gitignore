@@ -2,6 +2,7 @@
 .chromium/
 .superpowers/
 .profiles/
+dist/
 docs/validation/build-status.json
 ui/new-tab/*.js
 **/__pycache__/
