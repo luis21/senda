@@ -68,3 +68,13 @@ Un único revisor independiente identificó un hallazgo crítico y cinco importa
 - Observación de reanudación: se reevalúa el plazo persistido al despertar y se agrupan las solicitudes si ya hay una operación activa.
 
 Las regresiones fallaron antes de la corrección. Resultado conjunto final: **48/48 pruebas nativas PASS**, con ambas fuentes completas y respaldo binario; objetos de arranque, throttle y servicio compilan. Replay de **17 parches y 126 archivos: PASS**. Compilación completa y ejecución real/visual aún pendientes.
+
+## Primera ejecución real y ajuste de integración
+
+La compilación completa de Chromium terminó correctamente con cuatro tareas: 1.012 pasos en 47 min 48 s. El primer documento del perfil exclusivo usó las reglas de prueba sin recargar: bloqueo de red y CSS correctos.
+
+Ambas descargas oficiales funcionaron (EasyList `202611181320`, EasyPrivacy `202611181309`) y se ejecutó el servicio `senda.mojom.FilterCompiler` con `--service-sandbox-type=service`, sin desactivar sandbox. Sin embargo, el navegador se cerró al esperar la terminación del trabajador: `WaitForExitWithTimeout` exige `WithBaseSyncPrimitives` además de `MayBlock` en la tarea del pool. El log reprodujo ese DCHECK; se añadió únicamente ese trait al trabajo de fondo. La activación real aún debe repetirse y no se considera aprobada.
+
+El ejecutable de integración ahora registra salidas inesperadas y escribe un log propio, para detectar un cierre inmediatamente. Se añadieron además cuatro pruebas del texto de estado del panel: preparación, operación, respaldo sin conexión, versión anterior conservada, activa sin guardar y ausencia total de protección. Esta última falló antes de corregir el mensaje. **52/52 pruebas nativas PASS**; el panel conectado al formateador compila. **18 parches / 129 archivos: replay PASS**.
+
+El enlace incremental conserva revisión, recursos y comprobación de parches. Reutiliza hooks, argumentos y el grafo GN ya comprobados, que no cambiaron desde la compilación completa; solo escribe un nuevo sello tras éxito. La ejecución real y la inspección visual siguen pendientes de ese enlace.

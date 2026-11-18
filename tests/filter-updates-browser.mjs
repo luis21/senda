@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
-import {mkdir, readFile, writeFile, rm} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {mkdir, readFile, writeFile, readdir, rm} from 'node:fs/promises';
 import {setTimeout as delay} from 'node:timers/promises';
 import {connect} from './helpers/cdp.mjs';
 
@@ -22,6 +23,9 @@ const until = async (read, predicate, timeout = 30000) => {
   const end = Date.now() + timeout;
   let value;
   while (Date.now() < end) {
+    if (browser && browser.exitCode !== null && browser.exitCode !== 0) {
+      throw Error(`Browser exited unexpectedly (${browser.exitCode}); see ${path.join(profile, 'browser.log')}`);
+    }
     try { value = await read(); if (predicate(value)) return value; } catch (e) { value = e.message; }
     await delay(400);
   }
@@ -55,6 +59,12 @@ if (process.argv.includes('--seed-only')) {
   console.log(`Seeded test cache: ${profile} (${seeded})`);
   process.exit(0);
 }
+const stamp = await json(path.join(output, '.senda-build.json'));
+assert.equal(stamp.status, 'success', 'Complete the browser build before integration testing');
+assert.equal(stamp.revision, (await json(path.join(root, 'config/chromium.json'))).revision);
+for (const patch of (await readFile('patches/series', 'utf8')).trim().split(/\r?\n/)) {
+  assert.equal(stamp.patches[patch]?.toLowerCase(), createHash('sha256').update(await readFile(path.join(root, 'patches', patch))).digest('hex'));
+}
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   if (req.url.startsWith('/page')) {
@@ -84,13 +94,17 @@ const close = async () => {
     });
   }
 };
-const launch = async () => {
+const launch = async (offline = false) => {
   await rm(path.join(profile, 'DevToolsActivePort'), {force: true});
   browser = spawn(path.join(output, 'chrome.exe'), [
     '--headless', `--user-data-dir=${profile}`, '--remote-debugging-port=0',
     '--no-first-run', '--no-default-browser-check', '--no-proxy-server',
-    '--host-resolver-rules=MAP *.senda.test 127.0.0.1, MAP ad.doubleclick.net 127.0.0.1', url,
+    '--enable-logging', `--log-file=${path.join(profile, 'browser.log')}`,
+    `--host-resolver-rules=MAP *.senda.test 127.0.0.1, MAP ad.doubleclick.net 127.0.0.1${offline ? ', MAP easylist.to ~NOTFOUND' : ''}`, url,
   ], {windowsHide: true, stdio: 'ignore'});
+  browser.once('exit', (code, signal) => {
+    (report.browserExits ??= []).push({code, signal, time: new Date().toISOString()});
+  });
   const active = await until(() => readFile(path.join(profile, 'DevToolsActivePort'), 'utf8'), Boolean, 60000);
   const [debugPort, endpoint] = active.trim().split('\n');
   cdp = await connect(+debugPort, endpoint);
@@ -148,9 +162,9 @@ try {
   report.savedState = state.senda.filter_updates;
   check('Native index publication matches committed generation', state.senda.ruleset_version.content === `senda-updated-${updated.active}`);
   await automaticOff();
-  const restarted = await launch();
+  const restarted = await launch(true);
   await until(() => styles(restarted), Boolean);
-  check('Restart retains committed cache with automatic updates off', (await pointer()).active === updated.active && !(await fetchBlocked(restarted)));
+  check('Restart retains committed cache with update host unavailable and automatic updates off', (await pointer()).active === updated.active && !(await fetchBlocked(restarted)));
   await close();
   const rulesFile = path.join(activeDirectory, 'UnindexedRules');
   const bytes = await readFile(rulesFile);
@@ -173,6 +187,37 @@ try {
   }, Boolean);
   check('Two corrupt generations recover bundled network protection', true);
   await close();
+  const preferencesFile = path.join(profile, 'Default/Preferences');
+  const preferences = await json(preferencesFile);
+  const allowedUrl = `http://allowed.senda.test:${port}/page`;
+  const exceptionKey = `http://allowed.senda.test:${port},*`;
+  preferences.profile ??= {};
+  preferences.profile.content_settings ??= {};
+  preferences.profile.content_settings.exceptions ??= {};
+  preferences.profile.content_settings.exceptions.subresource_filter ??= {};
+  preferences.profile.content_settings.exceptions.subresource_filter[exceptionKey] = {setting: 1};
+  await writeFile(preferencesFile, JSON.stringify(preferences));
+  for (let restart = 0; restart < 2; ++restart) {
+    await launch(true);
+    const target = await cdp.send('Target.createTarget', {url: allowedUrl});
+    const session = await attach(target.targetId);
+    await until(() => styles(session), Boolean);
+    check(`Site exception remains effective after restart ${restart + 1}`,
+      !(await evaluate(session, `fetch('http://ad.doubleclick.net:${port}/ad.js?'+Math.random()).then(()=>false,()=>true)`)));
+    await close();
+  }
+  const interruptedState = await json(path.join(profile, 'Local State'));
+  interruptedState.senda.filter_updates.automatic = true;
+  interruptedState.senda.filter_updates.last_check = '0';
+  await writeFile(path.join(profile, 'Local State'), JSON.stringify(interruptedState));
+  await launch();
+  await until(async () => (await readdir(path.join(profile, 'SendaFilterLists'))).some(name => name.startsWith('staging-')), Boolean, 180000);
+  const children = (await cdp.send('SystemInfo.getProcessInfo')).processInfo.map(item => item.id);
+  await close();
+  await until(async () => Number((await run('powershell.exe', ['-NoProfile', '-Command',
+    `@(Get-Process -Id ${children.join(',')} -ErrorAction SilentlyContinue).Count`])).trim()) === 0, Boolean, 20000);
+  check('Closing during an update leaves no browser-owned processes', true);
+  await automaticOff();
   report.result = 'PASS';
 } catch (error) {
   report.result = 'FAIL'; report.error = error.stack;

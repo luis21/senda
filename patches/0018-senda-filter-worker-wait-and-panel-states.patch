@@ -1,0 +1,173 @@
+diff --git a/chrome/browser/subresource_filter/BUILD.gn b/chrome/browser/subresource_filter/BUILD.gn
+--- a/chrome/browser/subresource_filter/BUILD.gn
++++ b/chrome/browser/subresource_filter/BUILD.gn
+@@ -230,6 +230,7 @@
+     "//components/subresource_filter/core/browser/senda_index_cleanup_unittest.cc",
+     "//components/subresource_filter/core/common/senda_ruleset_validator_unittest.cc",
+     "senda_filter_updater_unittest.cc",
++    "senda_filter_update_message_unittest.cc",
+     "//components/subresource_filter/core/common/senda_generation_unittest.cc",
+     "//components/subresource_filter/tools/rule_parser/senda_filter_compiler_unittest.cc",
+     "//components/subresource_filter/tools/rule_parser/senda_filter_official_unittest.cc",
+@@ -265,7 +266,8 @@
+ }
+ 
+ source_set("senda_filter_updater") {
+-  sources = [ "senda_filter_updater.cc", "senda_filter_updater.h" ]
++  sources = [ "senda_filter_updater.cc", "senda_filter_updater.h",
++              "senda_filter_update_message.cc", "senda_filter_update_message.h" ]
+   public_deps = [
+     ":senda_filter_store",
+     "//base",
+diff --git a/chrome/browser/subresource_filter/senda_filter_compiler_process.cc b/chrome/browser/subresource_filter/senda_filter_compiler_process.cc
+--- a/chrome/browser/subresource_filter/senda_filter_compiler_process.cc
++++ b/chrome/browser/subresource_filter/senda_filter_compiler_process.cc
+@@ -73,7 +73,8 @@
+   // A utility reply alone does not revoke its writable output handle. Stop
+   // our dedicated worker before the parent validates/indexes that file.
+   base::ThreadPool::PostTaskAndReplyWithResult(FROM_HERE,
+-      {base::MayBlock(), base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
++      {base::MayBlock(), base::WithBaseSyncPrimitives(),
++       base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
+       base::BindOnce(&StopWorker, std::move(process_)),
+       base::BindOnce(&SendaFilterCompilerProcess::OnStopped, weak_.GetWeakPtr(),
+           std::move(done), std::move(result)));
+diff --git a/chrome/browser/subresource_filter/senda_filter_update_message.h b/chrome/browser/subresource_filter/senda_filter_update_message.h
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/subresource_filter/senda_filter_update_message.h
+@@ -0,0 +1,11 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#ifndef CHROME_BROWSER_SUBRESOURCE_FILTER_SENDA_FILTER_UPDATE_MESSAGE_H_
++#define CHROME_BROWSER_SUBRESOURCE_FILTER_SENDA_FILTER_UPDATE_MESSAGE_H_
++#include <string>
++namespace subresource_filter {
++struct FilterUpdateStatus;
++std::u16string GetSendaFilterUpdateMessage(const FilterUpdateStatus& status,
++                                         bool protection_ready);
++}
++#endif
+diff --git a/chrome/browser/subresource_filter/senda_filter_update_message.cc b/chrome/browser/subresource_filter/senda_filter_update_message.cc
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/subresource_filter/senda_filter_update_message.cc
+@@ -0,0 +1,27 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#include "chrome/browser/subresource_filter/senda_filter_update_message.h"
++#include "chrome/browser/subresource_filter/senda_filter_updater.h"
++namespace subresource_filter {
++std::u16string GetSendaFilterUpdateMessage(const FilterUpdateStatus& status,
++                                         bool protection_ready) {
++  if (status.phase == FilterUpdatePhase::kLoading) { return u"Preparando listas…"; }
++  if (status.phase != FilterUpdatePhase::kIdle) { return u"Comprobando listas…"; }
++  if (!protection_ready) {
++    return u"No se pudo preparar la protección. Pulsa Buscar actualizaciones para reintentar.";
++  }
++  switch (status.outcome) {
++    case FilterUpdateOutcome::kNone:
++      return u"Las listas incluidas protegen sin conexión.";
++    case FilterUpdateOutcome::kUnchanged:
++      return u"Las listas ya están actualizadas.";
++    case FilterUpdateOutcome::kUpdated:
++      return u"Listas actualizadas.";
++    case FilterUpdateOutcome::kError:
++      return status.persistence_error ?
++          u"Las listas activas no pudieron guardarse. Se reintentará la actualización." :
++          u"No se pudo actualizar. Se conserva la versión anterior.";
++  }
++  return u"Estado no disponible.";
++}
++}
+diff --git a/chrome/browser/subresource_filter/senda_filter_update_message_unittest.cc b/chrome/browser/subresource_filter/senda_filter_update_message_unittest.cc
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/subresource_filter/senda_filter_update_message_unittest.cc
+@@ -0,0 +1,46 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#include "chrome/browser/subresource_filter/senda_filter_update_message.h"
++#include "chrome/browser/subresource_filter/senda_filter_updater.h"
++#include "testing/gtest/include/gtest/gtest.h"
++namespace subresource_filter {
++TEST(SendaPanelMessageTest, UnavailableProtectionNeverPromisesAnActiveGeneration) {
++  FilterUpdateStatus status;
++  status.phase = FilterUpdatePhase::kIdle;
++  for (auto outcome : {FilterUpdateOutcome::kNone, FilterUpdateOutcome::kUnchanged,
++                        FilterUpdateOutcome::kUpdated, FilterUpdateOutcome::kError}) {
++    status.outcome = outcome;
++    EXPECT_EQ(u"No se pudo preparar la protección. Pulsa Buscar actualizaciones para reintentar.",
++              GetSendaFilterUpdateMessage(status, false));
++  }
++}
++TEST(SendaPanelMessageTest, KeepsPreviousAndUnsavedGenerationsDistinct) {
++  FilterUpdateStatus status;
++  status.phase = FilterUpdatePhase::kIdle;
++  status.outcome = FilterUpdateOutcome::kError;
++  EXPECT_EQ(u"No se pudo actualizar. Se conserva la versión anterior.",
++            GetSendaFilterUpdateMessage(status, true));
++  status.persistence_error = true;
++  EXPECT_EQ(u"Las listas activas no pudieron guardarse. Se reintentará la actualización.",
++            GetSendaFilterUpdateMessage(status, true));
++}
++TEST(SendaPanelMessageTest, PreparingAndWorkingDoNotReportSuccess) {
++  FilterUpdateStatus status;
++  status.outcome = FilterUpdateOutcome::kUpdated;
++  EXPECT_EQ(u"Preparando listas…", GetSendaFilterUpdateMessage(status, false));
++  for (auto phase : {FilterUpdatePhase::kDownloading, FilterUpdatePhase::kCompiling,
++                      FilterUpdatePhase::kPublishing}) {
++    status.phase = phase;
++    EXPECT_EQ(u"Comprobando listas…", GetSendaFilterUpdateMessage(status, true));
++  }
++}
++TEST(SendaPanelMessageTest, BundledUnchangedAndUpdatedResultsAreDistinct) {
++  FilterUpdateStatus status;
++  status.phase = FilterUpdatePhase::kIdle;
++  EXPECT_EQ(u"Las listas incluidas protegen sin conexión.", GetSendaFilterUpdateMessage(status, true));
++  status.outcome = FilterUpdateOutcome::kUnchanged;
++  EXPECT_EQ(u"Las listas ya están actualizadas.", GetSendaFilterUpdateMessage(status, true));
++  status.outcome = FilterUpdateOutcome::kUpdated;
++  EXPECT_EQ(u"Listas actualizadas.", GetSendaFilterUpdateMessage(status, true));
++}
++}
+diff --git a/chrome/browser/ui/views/content_setting_bubble_contents.cc b/chrome/browser/ui/views/content_setting_bubble_contents.cc
+--- a/chrome/browser/ui/views/content_setting_bubble_contents.cc
++++ b/chrome/browser/ui/views/content_setting_bubble_contents.cc
+@@ -15,6 +15,7 @@
+ #include "chrome/browser/favicon/favicon_service_factory.h"
+ #include "chrome/browser/browser_process.h"
+ #include "chrome/browser/subresource_filter/senda_filter_updater.h"
++#include "chrome/browser/subresource_filter/senda_filter_update_message.h"
+ #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/ui/color/chrome_color_id.h"
+@@ -684,26 +685,8 @@
+                            u"\nEasyPrivacy: " + version(status.versions[1]));
+   senda_last_check_->SetText(status.last_check.is_null() ? u"Sin comprobaciones todavía" :
+       u"Última comprobación: " + base::TimeFormatShortDateAndTime(status.last_check));
+-  std::u16string result;
+-  if (status.phase == subresource_filter::FilterUpdatePhase::kLoading) {
+-    result = u"Preparando listas…";
+-  } else if (busy) {
+-    result = u"Comprobando listas…";
+-  } else {
+-    switch (status.outcome) {
+-      case subresource_filter::FilterUpdateOutcome::kNone:
+-        result = u"Las listas incluidas protegen sin conexión."; break;
+-      case subresource_filter::FilterUpdateOutcome::kUnchanged:
+-        result = u"Las listas ya están actualizadas."; break;
+-      case subresource_filter::FilterUpdateOutcome::kUpdated:
+-        result = u"Listas actualizadas."; break;
+-      case subresource_filter::FilterUpdateOutcome::kError:
+-        result = status.persistence_error ?
+-            u"Las listas activas no pudieron guardarse. Se reintentará la actualización." :
+-            u"No se pudo actualizar. Se conserva la versión anterior."; break;
+-    }
+-  }
+-  senda_result_->SetText(result);
++  senda_result_->SetText(subresource_filter::GetSendaFilterUpdateMessage(
++      status, senda_updater_->IsReady()));
+   PreferredSizeChanged();
+   if (GetWidget() && !GetWidget()->IsClosed()) { SizeToContents(); }
+ }
