@@ -131,7 +131,7 @@ const automaticOff = async () => {
   state.senda.filter_updates.automatic = false;
   await writeFile(file, JSON.stringify(state));
 };
-try {
+async function normalScenario() {
   const oldPage = await launch();
   monitor = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
     path.join(root, 'tests/helpers/measure-filter-worker.ps1'), '-BrowserProcessId', String(browser.pid), '-Profile', profile],
@@ -156,6 +156,8 @@ try {
   await stopMonitor();
   check('Compiler worker observed with sandbox requested', report.workerMeasurement.workers.some(worker =>
     worker.command.includes('--service-sandbox-type=service') && !worker.command.includes('--no-sandbox')));
+  check('Worker token confirms low-integrity Windows isolation', report.workerMeasurement.workers.some(worker =>
+    worker.integrityRid <= 4096 && (worker.tokenRestricted || worker.appContainer)));
   check('Compiler worker absent after publication', report.workerMeasurement.workersRemaining === 0);
   await close();
   const state = await json(path.join(profile, 'Local State'));
@@ -166,6 +168,9 @@ try {
   await until(() => styles(restarted), Boolean);
   check('Restart retains committed cache with update host unavailable and automatic updates off', (await pointer()).active === updated.active && !(await fetchBlocked(restarted)));
   await close();
+  const offlineState = await json(path.join(profile, 'Local State'));
+  check('Offline restart publishes the downloaded index rather than silently falling back',
+    offlineState.senda.ruleset_version.content === `senda-updated-${updated.active}`);
   const rulesFile = path.join(activeDirectory, 'UnindexedRules');
   const bytes = await readFile(rulesFile);
   bytes[bytes.length >> 1] ^= 1;
@@ -218,6 +223,30 @@ try {
     `@(Get-Process -Id ${children.join(',')} -ErrorAction SilentlyContinue).Count`])).trim()) === 0, Boolean, 20000);
   check('Closing during an update leaves no browser-owned processes', true);
   await automaticOff();
+}
+async function interruptedWorkerScenario() {
+  const session = await launch();
+  monitor = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+    path.join(root, 'tests/helpers/measure-filter-worker.ps1'), '-BrowserProcessId', String(browser.pid),
+    '-Profile', profile, '-InterruptFirstWorker'], {windowsHide: true, stdio: 'ignore'});
+  await until(() => styles(session), value => value?.[0] === 'none');
+  const marker = path.join(profile, 'worker-interrupted.json');
+  await until(() => readFile(marker, 'utf8'), Boolean, 180000);
+  report.interruptedWorker = JSON.parse((await readFile(marker, 'utf8')).replace(/^\uFEFF/, ''));
+  await until(async () => !(await readdir(path.join(profile, 'SendaFilterLists'))).some(name => name.startsWith('staging-')), Boolean);
+  check('Worker disconnection leaves the active generation unchanged', (await pointer()).active === seeded);
+  check('Worker disconnection preserves network protection', await fetchBlocked(session));
+  check('Worker disconnection preserves cosmetic protection', (await styles(session))[0] === 'none');
+  await stopMonitor();
+  check('Interrupted compiler leaves no idle worker', report.workerMeasurement.workersRemaining === 0);
+  await close();
+  const state = await json(path.join(profile, 'Local State'));
+  check('Disconnection records an update error rather than success', state.senda.filter_updates.outcome === 3);
+  await automaticOff();
+}
+try {
+  report.mode = process.argv.includes('--interrupt-worker') ? 'worker-disconnection' : 'normal';
+  await (report.mode === 'normal' ? normalScenario() : interruptedWorkerScenario());
   report.result = 'PASS';
 } catch (error) {
   report.result = 'FAIL'; report.error = error.stack;

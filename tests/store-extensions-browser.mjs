@@ -29,6 +29,13 @@ const live=await new Promise(resolve=>{
   socket.once('connect',()=>finish(true));socket.once('error',()=>finish(false));socket.setTimeout(1000,()=>finish(true));
 });
 assert.equal(live,false,'Close this test profile before running verification');
+// Keep the native fixture stable while exercising installed extensions.
+const localStateFile = path.join(profile,'Local State');
+const localState = JSON.parse(await readFile(localStateFile,'utf8'));
+localState.senda ??= {};
+localState.senda.filter_updates ??= {};
+localState.senda.filter_updates.automatic = false;
+await writeFile(localStateFile,JSON.stringify(localState));
 const secure=JSON.parse(await readFile(path.join(profile,'Default/Secure Preferences'),'utf8'));
 const installed={};
 for(const id of ids){

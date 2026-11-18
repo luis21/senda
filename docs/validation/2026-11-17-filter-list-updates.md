@@ -78,3 +78,24 @@ Ambas descargas oficiales funcionaron (EasyList `202611181320`, EasyPrivacy `202
 El ejecutable de integración ahora registra salidas inesperadas y escribe un log propio, para detectar un cierre inmediatamente. Se añadieron además cuatro pruebas del texto de estado del panel: preparación, operación, respaldo sin conexión, versión anterior conservada, activa sin guardar y ausencia total de protección. Esta última falló antes de corregir el mensaje. **52/52 pruebas nativas PASS**; el panel conectado al formateador compila. **18 parches / 129 archivos: replay PASS**.
 
 El enlace incremental conserva revisión, recursos y comprobación de parches. Reutiliza hooks, argumentos y el grafo GN ya comprobados, que no cambiaron desde la compilación completa; solo escribe un nuevo sello tras éxito. La ejecución real y la inspección visual siguen pendientes de ese enlace.
+
+## Resultado funcional final — 18 de noviembre
+
+El enlace incremental terminó correctamente en 5 min 52 s y actualizó el sello de los 18 parches. La repetición real aprobó **19 comprobaciones** en `compatibility-filter-updates-1795010155958`: descarga y publicación, documento antiguo coherente, nueva navegación actualizada, caché sin acceso al origen, confirmación del índice descargado tras reiniciar, recuperación anterior/incluida, excepciones persistentes y cierre durante actualización. Las siete salidas de navegador fueron normales.
+
+Un caso adicional interrumpió únicamente el trabajador hijo del perfil exclusivo y aprobó **5 comprobaciones**: generación anterior intacta, red y CSS protegidos, error persistido y ausencia de trabajador residual. No se terminaron navegadores personales.
+
+- Fuentes activadas: EasyList `202611181339`, EasyPrivacy `202611181350`.
+- Activación automática observada: 65.278 ms, incluyendo el aplazamiento inicial intencional de 60 segundos.
+- Trabajador: token restringido de Windows, integridad baja RID 4096; no se usó `--no-sandbox`. Cero trabajadores tras finalizar.
+- Pico observado: 58,8 MiB privados y 208,1 MiB de working set. Muestreo cada 500 ms; parte del working set son páginas compartidas. No constituye una comparación con Chrome comercial.
+- Conversión, validación e indexación local de las fuentes vendorizadas: 5.277 ms en la ejecución de pruebas. El trabajador real se observó durante unos 1,86 s; ese intervalo no es una medición exacta de la conversión.
+- **52 pruebas nativas**, **19 Python** de generación/sync y **16 Node** aprobadas. Estos resultados cubren ámbitos diferentes y no se suman como una sola batería de navegador.
+- Regresiones reales aprobadas: red, IDs/clases, DOM dinámico, clones/plantillas, excepciones cosméticas, preferencias explícitas, reconstrucción de índice corrupto y bloqueo de la primera navegación cuando no hay protección disponible.
+- uBlock Origin Lite y Dark Reader instaladas previamente: matriz de coexistencia, DNR con trabajador detenido, reinicio y Wikipedia aprobados. No se repitieron instalaciones.
+
+El árbol accesible del panel expuso interruptores independientes, ambas versiones, fecha, búsqueda manual y «Aceptar». Luis confirmó su legibilidad y la independencia del control del sitio; posteriormente confirmó el estado «Comprobando listas…». La automatización visual tuvo fallos de identificación de `chrome.exe` y de `GetCursorPos`; el alias idéntico `senda.exe` permitió leer el árbol, pero las acciones siguieron limitadas por el escritorio. No se afirma una captura visual automatizada completa de todos los estados. Los mensajes de preparación, éxito, error, protección ausente y persistencia están cubiertos por pruebas nativas.
+
+Artefactos de referencia locales: `compatibility-filter-updates-1795010155958/report.json`, `compatibility-filter-updates-1795010556998/report.json`, `store-check-1795009762914/report.json`, `public-check-1795009922203/report.json`, bajo `.profiles/`. Permanecen fuera de Git.
+
+La revisión independiente terminó sin menores pendientes tras las correcciones descritas. El instalador constituye el siguiente alcance: la compilación actual Dev no es un paquete redistribuible. Se inició Release por separado; al comprobar el estado para subir el código, el proceso ya no estaba activo y su sello seguía incompleto. Esa salida todavía no se puede empaquetar ni entregar.
