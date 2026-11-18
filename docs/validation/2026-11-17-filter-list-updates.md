@@ -55,3 +55,16 @@ El panel incorpora controles globales independientes de la excepción por sitio:
 - Ejecución conjunta: 40/40 pruebas nativas PASS, con las fuentes completas vendorizadas y validación adicional de la copia binaria incluida.
 - Preparación de caché por el ejecutable de pruebas: PASS. Solo admite perfiles con nombre `compatibility-filter-updates-*` bajo `.profiles`; no añade endpoints alternativos al navegador.
 - `tests/filter-updates-browser.mjs` prepara una generación sintética y comprueba su sustitución desde las URLs oficiales, coherencia de pestañas antiguas, reinicio y recuperación tras corrupción. La ejecución completa requiere terminar la nueva compilación del navegador.
+
+## Revisión independiente y correcciones
+
+Un único revisor independiente identificó un hallazgo crítico y cinco importantes; no dejó menores ni conductas sin juzgar. La compilación completa se pausó para corregirlos:
+
+- Preflight recursivo sin asignaciones antes de protobuf: límites por campo y presupuesto agregado de 65.536 elementos por chunk. Se reprodujeron rechazos ausentes para dominios, clases y excepciones anidados.
+- Recuperación de arranque independiente del índice previo: el coordinador elige una generación antes de liberar la primera navegación. El respaldo también necesita confirmación; si falla, muestra error y permite reintentar manualmente. La prueba de navegador ya no recarga para esconder una selección inicial incorrecta.
+- Un 304 requiere transporte satisfactorio y un validador realmente enviado. Un 304 no solicitado fuerza como máximo una nueva solicitud incondicional. La prueba de 304 con fallo de transporte ya rechazaba el caso de la fábrica de red; el guard explícito refuerza el contrato.
+- Mínimo de 100 reglas de red aceptadas por fuente, además de 1.000 combinadas. Una fuente formada por reglas no compatibles ya no puede sustituir protección válida.
+- Limpieza de índices durante la misma sesión tras commit satisfactorio, conservando actual/anterior y sentinels. Las comprobaciones posteriores reintentan archivos ocupados. La prueba de Windows detectó además diferencias entre separadores de ruta y motivó su normalización antes de comparar.
+- Observación de reanudación: se reevalúa el plazo persistido al despertar y se agrupan las solicitudes si ya hay una operación activa.
+
+Las regresiones fallaron antes de la corrección. Resultado conjunto final: **48/48 pruebas nativas PASS**, con ambas fuentes completas y respaldo binario; objetos de arranque, throttle y servicio compilan. Replay de **17 parches y 126 archivos: PASS**. Compilación completa y ejecución real/visual aún pendientes.

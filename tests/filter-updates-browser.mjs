@@ -65,9 +65,18 @@ const server = http.createServer((req, res) => {
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const port = server.address().port;
 const url = `http://site.senda.test:${port}/page`;
-let browser, cdp;
+let browser, cdp, monitor;
+const stopMonitor = async () => {
+  if (!monitor) return;
+  await writeFile(path.join(profile, 'stop-worker-measurement'), 'done');
+  const code = await new Promise(resolve => monitor.exitCode === null ? monitor.once('exit', resolve) : resolve(monitor.exitCode));
+  monitor = null;
+  assert.equal(code, 0, 'Worker measurement must finish successfully');
+  report.workerMeasurement = JSON.parse((await readFile(path.join(profile, 'worker-measurement.json'), 'utf8')).replace(/^\uFEFF/, ''));
+};
 const close = async () => {
   if (cdp) { try { await cdp.send('Browser.close'); } catch {} cdp.close(); cdp = null; }
+  else if (browser && browser.exitCode === null) { browser.kill(); }
   if (browser && browser.exitCode === null) {
     await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(Error('Browser did not close')), 15000);
@@ -80,7 +89,7 @@ const launch = async () => {
   browser = spawn(path.join(output, 'chrome.exe'), [
     '--headless', `--user-data-dir=${profile}`, '--remote-debugging-port=0',
     '--no-first-run', '--no-default-browser-check', '--no-proxy-server',
-    '--host-resolver-rules=MAP *.senda.test 127.0.0.1', url,
+    '--host-resolver-rules=MAP *.senda.test 127.0.0.1, MAP ad.doubleclick.net 127.0.0.1', url,
   ], {windowsHide: true, stdio: 'ignore'});
   const active = await until(() => readFile(path.join(profile, 'DevToolsActivePort'), 'utf8'), Boolean, 60000);
   const [debugPort, endpoint] = active.trim().split('\n');
@@ -110,6 +119,10 @@ const automaticOff = async () => {
 };
 try {
   const oldPage = await launch();
+  monitor = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+    path.join(root, 'tests/helpers/measure-filter-worker.ps1'), '-BrowserProcessId', String(browser.pid), '-Profile', profile],
+  {windowsHide: true, stdio: 'ignore'});
+  // Assert the very first document: reloading would hide a recovery/readiness race.
   await until(() => styles(oldPage), value => value?.[0] === 'none');
   check('Seed generation blocks network and hides its CSS', await fetchBlocked(oldPage));
   const began = Date.now();
@@ -125,9 +138,15 @@ try {
   const fresh = await newPage();
   check('New navigation uses updated cosmetics and preserves content', (await styles(fresh)).every(x => x === 'block'));
   check('New navigation uses updated network rules', !(await fetchBlocked(fresh)));
+  await delay(2000);
+  await stopMonitor();
+  check('Compiler worker observed with sandbox requested', report.workerMeasurement.workers.some(worker =>
+    worker.command.includes('--service-sandbox-type=service') && !worker.command.includes('--no-sandbox')));
+  check('Compiler worker absent after publication', report.workerMeasurement.workersRemaining === 0);
   await close();
   const state = await json(path.join(profile, 'Local State'));
   report.savedState = state.senda.filter_updates;
+  check('Native index publication matches committed generation', state.senda.ruleset_version.content === `senda-updated-${updated.active}`);
   await automaticOff();
   const restarted = await launch();
   await until(() => styles(restarted), Boolean);
@@ -141,12 +160,25 @@ try {
   await until(() => styles(recovered), value => value?.[0] === 'none');
   check('Corrupt active generation recovers previous network and cosmetics', await fetchBlocked(recovered));
   await close();
+  const recoveredState = await json(path.join(profile, 'Local State'));
+  check('Recovered previous index is persisted', recoveredState.senda.ruleset_version.content === `senda-updated-${seeded}`);
+  const previousRules = path.join(profile, 'SendaFilterLists', seeded, 'UnindexedRules');
+  const previousBytes = await readFile(previousRules);
+  previousBytes[previousBytes.length >> 1] ^= 1;
+  await writeFile(previousRules, previousBytes);
+  const fallback = await launch();
+  await until(async () => {
+    if ((await styles(fallback))?.[0] !== 'block') return false;
+    return evaluate(fallback, `fetch('http://ad.doubleclick.net:${port}/ad.js?'+Math.random()).then(()=>false,()=>true)`);
+  }, Boolean);
+  check('Two corrupt generations recover bundled network protection', true);
+  await close();
   report.result = 'PASS';
 } catch (error) {
   report.result = 'FAIL'; report.error = error.stack;
   throw error;
 } finally {
-  try { await close(); } finally {
+  try { try { await stopMonitor(); } finally { await close(); } } finally {
     await new Promise(resolve => server.close(resolve));
     await writeFile(path.join(profile, 'report.json'), JSON.stringify(report, null, 2));
     console.log(`Report: ${path.join(profile, 'report.json')}`);

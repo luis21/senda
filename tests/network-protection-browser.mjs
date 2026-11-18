@@ -24,7 +24,7 @@ if(recover) {
       else if(entry.name==='Ruleset Data')return file;
     }
   };
-  const index=await findIndex(path.join(profile,'Subresource Filter'));
+  const index=await findIndex(path.join(profile,'Senda Filter Rules'));
   assert.ok(index,'Seed profile must contain a previously verified index');
   await writeFile(index,'Senda controlled corrupt index');
   console.log('Corrupted test index: '+index);
@@ -53,9 +53,17 @@ await new Promise(resolve=>server.listen(requestedPort,'127.0.0.1',resolve));
 port=server.address().port;
 await mkdir(profile,{recursive:true});
 await rm(path.join(profile,'DevToolsActivePort'),{force:true});
+// These fixtures exercise the immutable bundled rules, not the updater.
+let localState = {};
+try { localState = JSON.parse(await readFile(path.join(profile,'Local State'),'utf8')); }
+catch (error) { if(error.code !== 'ENOENT')throw error; }
+localState.senda ??= {};
+localState.senda.filter_updates ??= {};
+localState.senda.filter_updates.automatic = false;
+await writeFile(path.join(profile,'Local State'),JSON.stringify(localState));
 if(unavailable) {
-  await mkdir(path.join(profile,'Subresource Filter'),{recursive:true});
-  await writeFile(path.join(profile,'Subresource Filter/Indexed Rules'),'Controlled test obstruction');
+  await mkdir(path.join(profile,'Senda Filter Rules'),{recursive:true});
+  await writeFile(path.join(profile,'Senda Filter Rules/Indexed Rules'),'Controlled test obstruction');
 }
 if(prepareAllow || customPrivacy) {
   await mkdir(path.join(profile,'Default'),{recursive:true});
