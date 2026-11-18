@@ -1,14 +1,15 @@
 [CmdletBinding()]
 param(
     [string]$CheckoutRoot,
-    [ValidateSet('Dev')][string]$Configuration = 'Dev',
+    [ValidateSet('Dev','Release')][string]$Configuration = 'Dev',
     [ValidateRange(1,8)][int]$Jobs = 2
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 if (-not $CheckoutRoot) { $CheckoutRoot = Join-Path $projectRoot '.chromium' }
 $CheckoutRoot = [IO.Path]::GetFullPath($CheckoutRoot)
-$previousStamp = Join-Path $CheckoutRoot 'src/out/SendaDev/.senda-build.json'
+$outputName = "Senda$Configuration"
+$previousStamp = Join-Path $CheckoutRoot "src/out/$outputName/.senda-build.json"
 if ((Test-Path -LiteralPath "$CheckoutRoot/.senda-revision") -and (Test-Path -LiteralPath $previousStamp)) {
     [IO.File]::WriteAllText($previousStamp, '{"status":"incomplete","revision":""}')
 }
@@ -31,7 +32,7 @@ $env:vs2026_install = $vsPath
 $env:GYP_MSVS_VERSION = '2026'
 & "$depot/python3.bat" "$projectRoot/tools/sync_filter_snapshot.py" --chromium-root $src
 if ($LASTEXITCODE -ne 0) { throw 'No se pudo verificar la instantanea de filtros.' }
-$output = Join-Path $src 'out/SendaDev'
+$output = Join-Path $src "out/$outputName"
 New-Item -ItemType Directory -Path $output -Force | Out-Null
 $stamp = Join-Path $output '.senda-build.json'
 [IO.File]::WriteAllText($stamp, (@{status='incomplete';revision=$manifest.revision} | ConvertTo-Json))
@@ -40,12 +41,13 @@ try {
     & cmd.exe /d /c "`"$depot\gclient.bat`" runhooks"
     if ($LASTEXITCODE -ne 0) { throw 'Fallo al preparar hooks.' }
 } finally { Pop-Location }
-Copy-Item -LiteralPath "$projectRoot/config/args.dev.gn" -Destination "$output/args.gn"
+$argsName = if ($Configuration -eq 'Release') { 'args.release.gn' } else { 'args.dev.gn' }
+Copy-Item -LiteralPath "$projectRoot/config/$argsName" -Destination "$output/args.gn"
 Push-Location $src
 try {
-    & cmd.exe /d /c "`"$depot\gn.bat`" gen out\SendaDev --fail-on-unused-args"
+    & cmd.exe /d /c "`"$depot\gn.bat`" gen out\$outputName --fail-on-unused-args"
     if ($LASTEXITCODE -ne 0) { throw 'Fallo GN: no se compilara ni lanzara un ejecutable anterior.' }
-    & cmd.exe /d /c "`"$depot\autoninja.bat`" -C out\SendaDev chrome -j $Jobs"
+    & cmd.exe /d /c "`"$depot\autoninja.bat`" -C out\$outputName chrome -j $Jobs"
     if ($LASTEXITCODE -ne 0) { throw 'Fallo de compilacion; lanzamiento bloqueado.' }
     if (-not (Test-Path -LiteralPath "$output/chrome.exe")) { throw 'Compilacion sin chrome.exe.' }
     $patchHashes = @{}
@@ -54,6 +56,6 @@ try {
             $patchHashes[$patchName.Trim()] = (Get-FileHash -LiteralPath "$projectRoot/patches/$($patchName.Trim())" -Algorithm SHA256).Hash
         }
     }
-    [IO.File]::WriteAllText($stamp, (@{patches=$patchHashes;status='success';revision=$manifest.revision;completedUtc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json))
+    [IO.File]::WriteAllText($stamp, (@{patches=$patchHashes;status='success';configuration=$Configuration;revision=$manifest.revision;completedUtc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json))
 } finally { Pop-Location }
 Write-Output "Compilacion disponible en $output/chrome.exe. Validar las funciones modificadas antes de dar por terminada la entrega."
