@@ -1,0 +1,1809 @@
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -1043,6 +1043,8 @@
+     "//chrome/browser/ssl",
+     "//chrome/browser/status_icons",
+     "//chrome/browser/subresource_filter",
++    "//chrome/browser/subresource_filter:senda_filter_updater",
++    "//chrome/browser/subresource_filter:senda_filter_compiler_process",
+     "//chrome/browser/supervised_user",
+     "//chrome/browser/sync_tab_context",
+     "//chrome/browser/tab_group_sync",
+diff --git a/chrome/browser/browser_process.h b/chrome/browser/browser_process.h
+--- a/chrome/browser/browser_process.h
++++ b/chrome/browser/browser_process.h
+@@ -78,6 +78,8 @@
+ 
+ namespace subresource_filter {
+ class RulesetService;
++class SendaFilterUpdater;
++class SendaFilterCompilerProcess;
+ }
+ 
+ namespace supervised_user {
+@@ -273,6 +275,7 @@
+   // Browsing subresource filter.
+   virtual subresource_filter::RulesetService*
+   subresource_filter_ruleset_service() = 0;
++  virtual subresource_filter::SendaFilterUpdater* senda_filter_updater();
+ 
+   // Returns the StartupData which owns any pre-created objects in //chrome
+   // before the full browser starts.
+diff --git a/chrome/browser/browser_process.cc b/chrome/browser/browser_process.cc
+--- a/chrome/browser/browser_process.cc
++++ b/chrome/browser/browser_process.cc
+@@ -9,3 +9,7 @@
+ BrowserProcess::BrowserProcess() = default;
+ 
+ BrowserProcess::~BrowserProcess() = default;
++
++subresource_filter::SendaFilterUpdater* BrowserProcess::senda_filter_updater() {
++  return nullptr;
++}
+diff --git a/chrome/browser/browser_process_impl.h b/chrome/browser/browser_process_impl.h
+--- a/chrome/browser/browser_process_impl.h
++++ b/chrome/browser/browser_process_impl.h
+@@ -212,6 +212,7 @@
+ #endif
+   subresource_filter::RulesetService* subresource_filter_ruleset_service()
+       override;
++  subresource_filter::SendaFilterUpdater* senda_filter_updater() override;
+ 
+   StartupData* startup_data() override;
+ 
+@@ -411,6 +412,9 @@
+   bool created_subresource_filter_ruleset_service_ = false;
+   std::unique_ptr<subresource_filter::RulesetService>
+       subresource_filter_ruleset_service_;
++  std::unique_ptr<subresource_filter::SendaFilterCompilerProcess> senda_filter_compiler_;
++  std::unique_ptr<subresource_filter::SendaFilterUpdater> senda_filter_updater_;
++  base::CallbackListSubscription senda_filter_ready_subscription_;
+ 
+   bool shutting_down_ = false;
+ 
+diff --git a/chrome/browser/browser_process_impl.cc b/chrome/browser/browser_process_impl.cc
+--- a/chrome/browser/browser_process_impl.cc
++++ b/chrome/browser/browser_process_impl.cc
+@@ -3,6 +3,9 @@
+ // found in the LICENSE file.
+ 
+ #include "chrome/browser/browser_process_impl.h"
++#include "chrome/browser/subresource_filter/senda_filter_updater.h"
++#include "chrome/browser/subresource_filter/senda_filter_compiler_process.h"
++#include "third_party/senda_filter_lists/BundledMetadata.inc"
+ 
+ #include <stddef.h>
+ #include <stdio.h>
+@@ -608,6 +611,9 @@
+ 
+ #if !BUILDFLAG(IS_ANDROID)
+ void BrowserProcessImpl::StartTearDown() {
++  senda_filter_ready_subscription_ = {};
++  senda_filter_updater_.reset();
++  senda_filter_compiler_.reset();
+ #if BUILDFLAG(IS_MAC)
+   // Emergency bound on UI-initiated shutdown; see shutdown_watchdog_mac.h.
+   shutdown_watchdog::OnBrowserTearDownStarted();
+@@ -1829,6 +1835,10 @@
+ }
+ #endif
+ 
++subresource_filter::SendaFilterUpdater* BrowserProcessImpl::senda_filter_updater() {
++  return senda_filter_updater_.get();
++}
++
+ void BrowserProcessImpl::CreateSubresourceFilterRulesetService() {
+   DCHECK(!subresource_filter_ruleset_service_);
+   created_subresource_filter_ruleset_service_ = true;
+@@ -1843,7 +1853,7 @@
+ 
+   subresource_filter_ruleset_service_ =
+       subresource_filter::RulesetService::Create(
+-          subresource_filter::kSafeBrowsingRulesetConfig, local_state(),
++          subresource_filter::kSendaRulesetConfig, local_state(),
+           user_data_dir,
+           subresource_filter::SafeBrowsingRulesetPublisher::Factory());
+   // The packaged snapshot is available offline. The native ruleset service
+@@ -1852,14 +1862,51 @@
+   // directory names without trusting any downloaded version/path strings.
+   const auto rules = ui::ResourceBundle::GetSharedInstance().GetRawDataResource(
+       IDR_SENDA_NETWORK_RULESET);
+-  if (!rules.empty()) {
+-    subresource_filter::UnindexedRulesetInfo info;
+-    info.content_version =
+-        "senda-" + base::HexEncodeLower(crypto::hash::Sha256(rules));
+-    info.resource_id = IDR_SENDA_NETWORK_RULESET;
+-    subresource_filter_ruleset_service_
+-        ->InstallBundledRuleset(info);
+-  }
++  if (rules.empty()) { return; }
++  subresource_filter::UnindexedRulesetInfo bundled_info;
++  bundled_info.content_version = "senda-" + base::HexEncodeLower(crypto::hash::Sha256(rules));
++  bundled_info.resource_id = IDR_SENDA_NETWORK_RULESET;
++  subresource_filter_ruleset_service_->InstallBundledRuleset(bundled_info);
++  subresource_filter::BundledFilterSnapshot bundled;
++  for (size_t i = 0; i < 2; ++i) {
++    bundled.versions[i] = subresource_filter::kSendaBundledVersions[i];
++  }
++  bundled.content_version = bundled_info.content_version;
++  bundled.license = subresource_filter::kSendaBundledLicense;
++  senda_filter_compiler_ = std::make_unique<subresource_filter::SendaFilterCompilerProcess>();
++  senda_filter_updater_ = std::make_unique<subresource_filter::SendaFilterUpdater>(
++      local_state(), user_data_dir, system_network_context_manager()->GetSharedURLLoaderFactory(),
++      std::move(bundled), base::BindRepeating(
++          [](subresource_filter::RulesetService* service,
++             subresource_filter::UnindexedRulesetInfo fallback,
++             const std::optional<subresource_filter::GenerationManifest>& generation,
++             subresource_filter::SendaFilterUpdater::PublishCompletion done) {
++            auto info = fallback;
++            std::string expected;
++            if (generation) {
++              expected = generation->id;
++              info.content_version = "senda-updated-" + expected;
++              info.resource_id = 0;
++              info.ruleset_path = generation->directory.AppendASCII("UnindexedRules");
++              info.license_path = generation->directory.AppendASCII("LICENSE");
++            }
++            const auto native_version = info.content_version;
++            service->PublishRuleset(info, base::BindOnce(
++                [](std::string native_version, std::string expected,
++                   subresource_filter::SendaFilterUpdater::PublishCompletion done,
++                   subresource_filter::RulesetService::PublishResult result) {
++                  const bool matches = result.content_version == native_version;
++                  std::move(done).Run(matches ? expected : result.content_version,
++                                      matches && result.success);
++                }, native_version, expected, std::move(done)));
++          }, base::Unretained(subresource_filter_ruleset_service_.get()), bundled_info),
++      base::BindRepeating(&subresource_filter::SendaFilterCompilerProcess::Compile,
++          base::Unretained(senda_filter_compiler_.get())),
++      base::BindRepeating(&subresource_filter::SendaFilterCompilerProcess::Cancel,
++          base::Unretained(senda_filter_compiler_.get())));
++  senda_filter_ready_subscription_ = subresource_filter_ruleset_service_->WhenRulesetReady(
++      base::BindOnce(&subresource_filter::SendaFilterUpdater::Start,
++          senda_filter_updater_->GetWeakPtr()));
+ }
+ 
+ #if !BUILDFLAG(IS_ANDROID)
+diff --git a/chrome/browser/prefs/BUILD.gn b/chrome/browser/prefs/BUILD.gn
+--- a/chrome/browser/prefs/BUILD.gn
++++ b/chrome/browser/prefs/BUILD.gn
+@@ -186,6 +186,7 @@
+     "//components/signin/core/browser",
+     "//components/site_engagement/content",
+     "//components/skills/public",
++    "//chrome/browser/subresource_filter:senda_filter_updater",
+     "//components/subresource_filter/content/browser",
+     "//components/subresource_filter/core/common",
+     "//components/supervised_user/core/browser",
+diff --git a/chrome/browser/prefs/browser_prefs.cc b/chrome/browser/prefs/browser_prefs.cc
+--- a/chrome/browser/prefs/browser_prefs.cc
++++ b/chrome/browser/prefs/browser_prefs.cc
+@@ -3,6 +3,7 @@
+ // found in the LICENSE file.
+ 
+ #include "chrome/browser/prefs/browser_prefs.h"
++#include "chrome/browser/subresource_filter/senda_filter_updater.h"
+ 
+ #include <array>
+ #include <optional>
+@@ -1594,6 +1595,9 @@
+   SSLConfigServiceManager::RegisterPrefs(registry);
+   subresource_filter::IndexedRulesetVersion::RegisterPrefs(
+       registry, subresource_filter::kSafeBrowsingRulesetConfig.filter_tag);
++  subresource_filter::IndexedRulesetVersion::RegisterPrefs(
++      registry, subresource_filter::kSendaRulesetConfig.filter_tag);
++  subresource_filter::SendaFilterUpdater::RegisterLocalStatePrefs(registry);
+   SystemNetworkContextManager::RegisterPrefs(registry);
+   tracing::RegisterPrefs(registry);
+   update_client::RegisterPrefs(registry);
+diff --git a/chrome/browser/component_updater/subresource_filter_component_installer.cc b/chrome/browser/component_updater/subresource_filter_component_installer.cc
+--- a/chrome/browser/component_updater/subresource_filter_component_installer.cc
++++ b/chrome/browser/component_updater/subresource_filter_component_installer.cc
+@@ -94,7 +94,8 @@
+       install_dir.Append(subresource_filter::kUnindexedRulesetLicenseFileName);
+   subresource_filter::RulesetService* ruleset_service =
+       g_browser_process->subresource_filter_ruleset_service();
+-  if (ruleset_service) {
++  if (ruleset_service && ruleset_service->config().filter_tag !=
++                            subresource_filter::kSendaRulesetConfig.filter_tag) {
+     ruleset_service->IndexAndStoreAndPublishRulesetIfNeeded(ruleset_info);
+   }
+ }
+diff --git a/chrome/browser/subresource_filter/BUILD.gn b/chrome/browser/subresource_filter/BUILD.gn
+--- a/chrome/browser/subresource_filter/BUILD.gn
++++ b/chrome/browser/subresource_filter/BUILD.gn
+@@ -227,6 +227,8 @@
+ 
+ test("senda_filter_updates_unittests") {
+   sources = [
++    "//components/subresource_filter/core/common/senda_ruleset_validator_unittest.cc",
++    "senda_filter_updater_unittest.cc",
+     "//components/subresource_filter/core/common/senda_generation_unittest.cc",
+     "//components/subresource_filter/tools/rule_parser/senda_filter_compiler_unittest.cc",
+     "//components/subresource_filter/tools/rule_parser/senda_filter_official_unittest.cc",
+@@ -234,6 +236,11 @@
+     "senda_filter_updates_test_main.cc",
+   ]
+   deps = [
++    "//mojo/core/embedder",
++    ":senda_filter_updater",
++    "//base/test:test_support",
++    "//components/prefs:test_support",
++    "//services/network:test_support",
+     ":senda_filter_store",
+     "//base",
+     "//components/subresource_filter/core/common",
+@@ -254,3 +261,29 @@
+   public_deps = [ "//base" ]
+   deps = [ "//crypto" ]
+ }
++
++source_set("senda_filter_updater") {
++  sources = [ "senda_filter_updater.cc", "senda_filter_updater.h" ]
++  public_deps = [
++    ":senda_filter_store",
++    "//base",
++    "//components/subresource_filter/tools/rule_parser:senda_filter_compiler",
++    "//services/network/public/cpp",
++  ]
++  deps = [
++    "//components/prefs",
++    "//crypto",
++    "//net",
++  ]
++}
++
++source_set("senda_filter_compiler_process") {
++  sources = [ "senda_filter_compiler_process.cc", "senda_filter_compiler_process.h" ]
++  public_deps = [
++    "//base",
++    "//components/subresource_filter/content/mojom:senda_filter_compiler",
++    "//components/subresource_filter/tools/rule_parser:senda_filter_compiler",
++    "//mojo/public/cpp/bindings",
++  ]
++  deps = [ "//content/public/browser" ]
++}
+diff --git a/chrome/browser/subresource_filter/senda_filter_updater.h b/chrome/browser/subresource_filter/senda_filter_updater.h
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/subresource_filter/senda_filter_updater.h
+@@ -0,0 +1,116 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#ifndef CHROME_BROWSER_SUBRESOURCE_FILTER_SENDA_FILTER_UPDATER_H_
++#define CHROME_BROWSER_SUBRESOURCE_FILTER_SENDA_FILTER_UPDATER_H_
++#include <array>
++#include <memory>
++#include <optional>
++#include <string>
++#include "base/callback_list.h"
++#include "base/files/file.h"
++#include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
++#include "base/threading/sequence_bound.h"
++#include "base/time/time.h"
++#include "base/timer/timer.h"
++#include "chrome/browser/subresource_filter/senda_filter_store.h"
++#include "components/subresource_filter/tools/rule_parser/senda_filter_compiler.h"
++#include "services/network/public/cpp/shared_url_loader_factory.h"
++class PrefRegistrySimple;
++class PrefService;
++namespace network { class SimpleURLLoader; }
++namespace subresource_filter {
++enum class FilterUpdateOutcome { kNone, kUnchanged, kUpdated, kError };
++enum class FilterUpdatePhase { kLoading, kIdle, kDownloading, kCompiling, kPublishing };
++struct FilterUpdateStatus {
++  bool automatic = true;
++  FilterUpdatePhase phase = FilterUpdatePhase::kLoading;
++  FilterUpdateOutcome outcome = FilterUpdateOutcome::kNone;
++  std::array<std::string, 2> versions;
++  std::string generation_id;
++  base::Time last_check;
++  bool persistence_error = false;
++};
++struct BundledFilterSnapshot {
++  std::array<std::string, 2> versions;
++  std::string content_version;
++  std::string license;
++};
++class SendaFilterUpdater {
++ public:
++  using CompileCompletion = base::OnceCallback<void(CompileResult)>;
++  using Compiler = base::RepeatingCallback<void(base::File, base::File, base::File, CompileCompletion)>;
++  using PublishCompletion = base::OnceCallback<void(std::string, bool)>;
++  // nullopt explicitly requests the trusted bundled fallback, not network data.
++  using Publisher = base::RepeatingCallback<void(const std::optional<GenerationManifest>&, PublishCompletion)>;
++  SendaFilterUpdater(PrefService* local_state, const base::FilePath& user_data_dir,
++                     scoped_refptr<network::SharedURLLoaderFactory> factory,
++                     BundledFilterSnapshot bundled, Publisher publisher,
++                     Compiler compiler, base::RepeatingClosure cancel_compiler = {},
++                     SendaFilterStore::AtomicWriter store_writer = {});
++  ~SendaFilterUpdater();
++  SendaFilterUpdater(const SendaFilterUpdater&) = delete;
++  SendaFilterUpdater& operator=(const SendaFilterUpdater&) = delete;
++  static void RegisterLocalStatePrefs(PrefRegistrySimple* registry);
++  // Production calls Start only after the initial ruleset has been published.
++  void Start();
++  base::WeakPtr<SendaFilterUpdater> GetWeakPtr() { return lifetime_.GetWeakPtr(); }
++  void CheckNow();
++  void SetAutomaticUpdates(bool enabled);
++  FilterUpdateStatus GetStatus() const;
++  base::CallbackListSubscription Observe(base::RepeatingClosure callback);
++ private:
++  struct SourceHashes { bool valid = false; std::array<std::string, 2> hashes; };
++  struct CompilerFiles { base::File first, second, output; };
++  static SourceHashes HashSources(base::FilePath directory);
++  static CompilerFiles OpenCompilerFiles(base::FilePath directory);
++  void OnRecovered(RecoveryResult recovered);
++  void RestoreNext();
++  void OnRestored(std::string expected, std::string actual, bool success);
++  void Ready();
++  void Schedule();
++  std::string MinimumVersion(size_t index) const;
++  void Begin(base::FilePath staging);
++  void Download(size_t index, bool conditional);
++  void OnDownloaded(size_t index, bool conditional, base::FilePath file);
++  void OnCachedCopied(size_t index, bool success);
++  void SourceReady(size_t index, bool success);
++  void OnHashes(SourceHashes hashes);
++  void OnUnchangedCacheChecked(RecoveryResult recovered);
++  void CompileCandidate();
++  void OnCompilerFiles(CompilerFiles files);
++  void OnCompiled(CompileResult result);
++  void OnStaged(StageResult result);
++  void OnPublished(std::string expected, std::string actual, bool success);
++  void OnCommitted(bool success);
++  void OnRolledBack(std::string actual, bool success);
++  void Succeed(FilterUpdateOutcome outcome);
++  void Fail();
++  void Notify();
++  void SaveValidators();
++  void LoadValidators();
++  void CancelCompiler();
++  const raw_ptr<PrefService> prefs_;
++  const base::FilePath root_;
++  const scoped_refptr<network::SharedURLLoaderFactory> factory_;
++  const BundledFilterSnapshot bundled_;
++  const Publisher publisher_;
++  Compiler compiler_;
++  const base::RepeatingClosure cancel_compiler_;
++  base::SequenceBound<SendaFilterStore> store_;
++  FilterUpdateStatus status_;
++  RecoveryResult recovery_;
++  size_t restore_index_ = 0;
++  bool started_ = false, ready_ = false, manual_pending_ = false;
++  std::optional<GenerationManifest> active_, candidate_, prior_;
++  base::FilePath staging_;
++  std::array<FilterSourceInfo, 2> source_info_;
++  SourceHashes source_hashes_;
++  std::unique_ptr<network::SimpleURLLoader> loader_;
++  base::OneShotTimer timer_, compiler_timer_;
++  base::RepeatingClosureList observers_;
++  base::WeakPtrFactory<SendaFilterUpdater> lifetime_{this};
++  base::WeakPtrFactory<SendaFilterUpdater> operation_{this};
++};
++}  // namespace subresource_filter
++#endif
+diff --git a/chrome/browser/subresource_filter/senda_filter_updater.cc b/chrome/browser/subresource_filter/senda_filter_updater.cc
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/subresource_filter/senda_filter_updater.cc
+@@ -0,0 +1,451 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#include "chrome/browser/subresource_filter/senda_filter_updater.h"
++#include <algorithm>
++#include <utility>
++#include "base/files/file_util.h"
++#include "base/functional/bind.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_util.h"
++#include "base/task/thread_pool.h"
++#include "components/prefs/pref_registry_simple.h"
++#include "components/prefs/pref_service.h"
++#include "crypto/hash.h"
++#include "net/base/load_flags.h"
++#include "net/base/net_errors.h"
++#include "net/http/http_response_headers.h"
++#include "net/traffic_annotation/network_traffic_annotation.h"
++#include "net/url_request/redirect_info.h"
++#include "services/network/public/cpp/resource_request.h"
++#include "services/network/public/cpp/simple_url_loader.h"
++#include "services/network/public/mojom/url_response_head.mojom.h"
++
++namespace subresource_filter {
++namespace {
++constexpr char kAutomatic[] = "senda.filter_updates.automatic";
++constexpr char kLastCheck[] = "senda.filter_updates.last_check";
++constexpr char kRetryAfter[] = "senda.filter_updates.retry_after";
++constexpr char kFailures[] = "senda.filter_updates.failures";
++constexpr char kOutcome[] = "senda.filter_updates.outcome";
++constexpr char kVersions[] = "senda.filter_updates.versions";
++constexpr char kValidators[] = "senda.filter_updates.validators";
++constexpr std::array<const char*, 2> kUrls = {
++    "https://easylist.to/easylist/easylist.txt",
++    "https://easylist.to/easylist/easyprivacy.txt"};
++constexpr std::array<const char*, 2> kFiles = {"easylist.txt", "easyprivacy.txt"};
++constexpr size_t kSourceLimit = 20 * 1024 * 1024;
++std::string Hash(std::string_view text) {
++  return base::HexEncodeLower(crypto::hash::Sha256(text));
++}
++std::string HttpValidator(std::string value) {
++  return value.size() <= 8192 && base::IsStringUTF8(value) &&
++      std::ranges::none_of(value, [](unsigned char c) { return c < 32 || c == 127; })
++      ? value : std::string();
++}
++std::string SingleValidator(const net::HttpResponseHeaders& headers, std::string_view name) {
++  // ETag is non-coalescing: GetNormalizedHeader DCHECKs on it. Ignore
++  // ambiguous duplicates instead of synthesizing a different validator.
++  size_t iterator = 0;
++  const auto value = headers.EnumerateHeader(&iterator, name);
++  if (!value || headers.EnumerateHeader(&iterator, name)) { return {}; }
++  return HttpValidator(std::string(*value));
++}
++bool CopyCachedSource(base::FilePath from, base::FilePath to, std::string hash) {
++  std::string text;
++  return base::ReadFileToStringWithMaxSize(from, &text, kSourceLimit) &&
++      Hash(text) == hash && base::WriteFile(to, text);
++}
++bool WriteLicense(base::FilePath directory, std::string text) {
++  return !text.empty() && text.size() <= 128 * 1024 &&
++      base::WriteFile(directory.AppendASCII("LICENSE"), text);
++}
++}  // namespace
++
++SendaFilterUpdater::SendaFilterUpdater(PrefService* prefs, const base::FilePath& user_data_dir,
++    scoped_refptr<network::SharedURLLoaderFactory> factory, BundledFilterSnapshot bundled,
++    Publisher publisher, Compiler compiler, base::RepeatingClosure cancel_compiler,
++    SendaFilterStore::AtomicWriter store_writer)
++    : prefs_(prefs), root_(user_data_dir.AppendASCII("SendaFilterLists")),
++      factory_(std::move(factory)), bundled_(std::move(bundled)), publisher_(std::move(publisher)),
++      compiler_(std::move(compiler)), cancel_compiler_(std::move(cancel_compiler)),
++      store_(base::ThreadPool::CreateSequencedTaskRunner({base::MayBlock(), base::TaskPriority::USER_VISIBLE}), root_, std::move(store_writer)) {
++  status_.versions = bundled_.versions;
++  status_.last_check = prefs_->GetTime(kLastCheck);
++  const auto outcome = prefs_->GetInteger(kOutcome);
++  if (outcome >= 0 && outcome <= static_cast<int>(FilterUpdateOutcome::kError)) {
++    status_.outcome = static_cast<FilterUpdateOutcome>(outcome);
++  }
++  CHECK(!compiler_.is_null());
++}
++SendaFilterUpdater::~SendaFilterUpdater() { CancelCompiler(); }
++
++void SendaFilterUpdater::RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
++  registry->RegisterBooleanPref(kAutomatic, true);
++  registry->RegisterTimePref(kLastCheck, base::Time());
++  registry->RegisterTimePref(kRetryAfter, base::Time());
++  registry->RegisterIntegerPref(kFailures, 0);
++  registry->RegisterIntegerPref(kOutcome, 0);
++  registry->RegisterDictionaryPref(kVersions);
++  registry->RegisterDictionaryPref(kValidators);
++}
++FilterUpdateStatus SendaFilterUpdater::GetStatus() const {
++  auto status = status_;
++  status.automatic = prefs_->GetBoolean(kAutomatic);
++  return status;
++}
++base::CallbackListSubscription SendaFilterUpdater::Observe(base::RepeatingClosure callback) {
++  return observers_.Add(std::move(callback));
++}
++void SendaFilterUpdater::Notify() { observers_.Notify(); }
++void SendaFilterUpdater::Start() {
++  if (started_) { return; }
++  started_ = true;
++  store_.AsyncCall(&SendaFilterStore::Recover).Then(
++      base::BindOnce(&SendaFilterUpdater::OnRecovered, lifetime_.GetWeakPtr()));
++}
++void SendaFilterUpdater::OnRecovered(RecoveryResult recovered) {
++  recovery_ = std::move(recovered);
++  RestoreNext();
++}
++void SendaFilterUpdater::RestoreNext() {
++  if (restore_index_ < recovery_.generations.size()) {
++    const auto& generation = recovery_.generations[restore_index_];
++    publisher_.Run(generation, base::BindOnce(&SendaFilterUpdater::OnRestored,
++        lifetime_.GetWeakPtr(), generation.id));
++  } else {
++    publisher_.Run(std::nullopt, base::BindOnce(&SendaFilterUpdater::OnRestored,
++        lifetime_.GetWeakPtr(), std::string()));
++  }
++}
++void SendaFilterUpdater::OnRestored(std::string expected, std::string actual, bool success) {
++  if (expected.empty()) {
++    active_.reset();
++    status_.versions = success && actual.empty() ? bundled_.versions : std::array<std::string, 2>();
++    if (!success || !actual.empty()) { status_.outcome = FilterUpdateOutcome::kError; }
++    Ready();
++  } else if (success && expected == actual) {
++    active_ = recovery_.generations[restore_index_];
++    status_.versions = {active_->sources[0].version, active_->sources[1].version};
++    status_.generation_id = active_->id;
++    store_.AsyncCall(&SendaFilterStore::CommitActive).WithArgs(active_->id).Then(
++        base::BindOnce([](base::WeakPtr<SendaFilterUpdater> self, bool written) {
++          if (self) {
++            if (!written) { self->status_.outcome = FilterUpdateOutcome::kError; }
++            self->Ready();
++          }
++        }, lifetime_.GetWeakPtr()));
++  } else {
++    ++restore_index_;
++    RestoreNext();
++  }
++}
++void SendaFilterUpdater::Ready() {
++  recovery_ = {};
++  ready_ = true;
++  status_.phase = FilterUpdatePhase::kIdle;
++  LoadValidators();
++  Notify();
++  if (manual_pending_) {
++    manual_pending_ = false;
++    CheckNow();
++  } else if (prefs_->GetBoolean(kAutomatic)) {
++    timer_.Start(FROM_HERE, base::Minutes(1),
++        base::BindOnce(&SendaFilterUpdater::Schedule, lifetime_.GetWeakPtr()));
++  }
++}
++void SendaFilterUpdater::SetAutomaticUpdates(bool enabled) {
++  prefs_->SetBoolean(kAutomatic, enabled);
++  timer_.Stop();
++  Notify();
++  if (enabled && ready_ && status_.phase == FilterUpdatePhase::kIdle) { Schedule(); }
++}
++void SendaFilterUpdater::Schedule() {
++  if (!prefs_->GetBoolean(kAutomatic) || !ready_ || status_.phase != FilterUpdatePhase::kIdle) { return; }
++  const auto failures = std::clamp(prefs_->GetInteger(kFailures), 0, 3);
++  const auto delay = failures == 1 ? base::Hours(1) : failures == 2 ? base::Hours(6) : base::Days(1);
++  const auto last = prefs_->GetTime(kLastCheck);
++  const auto now = base::Time::Now();
++  auto due = last + delay;
++  if (failures && !prefs_->GetTime(kRetryAfter).is_null()) { due = prefs_->GetTime(kRetryAfter); }
++  if (!failures && prefs_->GetInteger(kOutcome) == static_cast<int>(FilterUpdateOutcome::kNone)) {
++    due = last + base::Hours(1);  // Resume an interrupted check without waiting a full day.
++  }
++  if (last.is_null() || due <= now || last > now + base::Days(1)) { CheckNow(); return; }
++  timer_.Start(FROM_HERE, due - now,
++      base::BindOnce(&SendaFilterUpdater::CheckNow, lifetime_.GetWeakPtr()));
++}
++std::string SendaFilterUpdater::MinimumVersion(size_t index) const {
++  auto floor = bundled_.versions[index];
++  if (const auto* accepted = prefs_->GetDict(kVersions).FindString(kFiles[index])) {
++    floor = std::max(floor, *accepted);
++  }
++  if (active_) { floor = std::max(floor, active_->sources[index].version); }
++  return floor;
++}
++void SendaFilterUpdater::CheckNow() {
++  if (!ready_) { manual_pending_ = true; return; }
++  if (status_.phase != FilterUpdatePhase::kIdle) { return; }
++  timer_.Stop();
++  operation_.InvalidateWeakPtrs();
++  status_.phase = FilterUpdatePhase::kDownloading;
++  status_.outcome = FilterUpdateOutcome::kNone;
++  status_.persistence_error = false;
++  status_.last_check = base::Time::Now();
++  prefs_->SetTime(kLastCheck, status_.last_check);
++  prefs_->SetInteger(kOutcome, static_cast<int>(FilterUpdateOutcome::kNone));
++  source_info_ = {};
++  source_hashes_ = {};
++  candidate_.reset(); prior_.reset(); staging_.clear();
++  Notify();
++  store_.AsyncCall(&SendaFilterStore::CreateStagingDirectory).Then(
++      base::BindOnce(&SendaFilterUpdater::Begin, operation_.GetWeakPtr()));
++}
++void SendaFilterUpdater::Begin(base::FilePath staging) {
++  if (staging.empty()) { Fail(); return; }
++  staging_ = std::move(staging);
++  Download(0, true);
++}
++void SendaFilterUpdater::Download(size_t index, bool conditional) {
++  auto request = std::make_unique<network::ResourceRequest>();
++  request->url = GURL(kUrls[index]);
++  request->credentials_mode = network::mojom::CredentialsMode::kOmit;
++  request->load_flags = net::LOAD_DISABLE_CACHE | net::LOAD_BYPASS_CACHE;
++  request->headers.SetHeader("Accept", "text/plain");
++  if (conditional && active_ && active_->sources[index].version >= MinimumVersion(index)) {
++    const auto& source = active_->sources[index];
++    if (!source.etag.empty()) { request->headers.SetHeader("If-None-Match", source.etag); }
++    if (!source.last_modified.empty()) { request->headers.SetHeader("If-Modified-Since", source.last_modified); }
++  }
++  constexpr auto annotation = net::DefineNetworkTrafficAnnotation("senda_protection_list_update", R"(
++    semantics {
++      sender: "Senda protection list updater"
++      description: "Downloads EasyList and EasyPrivacy to update native advertisement and tracker blocking."
++      trigger: "Daily while Senda is open with automatic updates enabled, or a user manual check."
++      data: "No account or browsing data. Conditional HTTP validators from the previous list response."
++      destination: WEBSITE
++      destination_other: "https://easylist.to/"
++    }
++    policy {
++      cookies_allowed: NO
++      setting: "Automatic protection list updates can be disabled in Senda's protection panel. Manual checks remain available."
++      policy_exception_justification: "No enterprise policy is implemented for this Senda-specific feature."
++    })");
++  loader_ = network::SimpleURLLoader::Create(std::move(request), annotation);
++  loader_->SetTimeoutDuration(base::Seconds(60));
++  loader_->SetAllowHttpErrorResults(true);
++  loader_->SetOnRedirectCallback(base::BindRepeating(
++      [](base::WeakPtr<SendaFilterUpdater> self, size_t index, const GURL&,
++         const net::RedirectInfo& redirect, const network::mojom::URLResponseHead&,
++         std::vector<std::string>*) {
++        if (self && redirect.new_url != GURL(kUrls[index])) { self->Fail(); }
++      }, operation_.GetWeakPtr(), index));
++  loader_->DownloadToFile(factory_.get(), base::BindOnce(&SendaFilterUpdater::OnDownloaded,
++      operation_.GetWeakPtr(), index, conditional),
++      staging_.AppendASCII(std::string(kFiles[index]) + ".download"), kSourceLimit);
++}
++void SendaFilterUpdater::OnDownloaded(size_t index, bool conditional, base::FilePath file) {
++  const auto* head = loader_->ResponseInfo();
++  const auto code = head && head->headers ? head->headers->response_code() : 0;
++  const auto net_error = loader_->NetError();
++  const auto mime = head ? head->mime_type : std::string();
++  if (head && head->headers) {
++    source_info_[index].etag = SingleValidator(*head->headers, "ETag");
++    source_info_[index].last_modified = SingleValidator(*head->headers, "Last-Modified");
++  }
++  loader_.reset();
++  if (code == 304 && conditional && active_ && active_->sources[index].version >= MinimumVersion(index)) {
++    auto& info = source_info_[index];
++    if (info.etag.empty()) { info.etag = active_->sources[index].etag; }
++    if (info.last_modified.empty()) { info.last_modified = active_->sources[index].last_modified; }
++    base::ThreadPool::PostTaskAndReplyWithResult(FROM_HERE, {base::MayBlock()},
++        base::BindOnce(&CopyCachedSource, active_->directory.AppendASCII(kFiles[index]),
++            staging_.AppendASCII(kFiles[index]), active_->sources[index].sha256),
++        base::BindOnce(&SendaFilterUpdater::OnCachedCopied, operation_.GetWeakPtr(), index));
++  } else if (code == 304 && conditional) {
++    Download(index, false);
++  } else if (code == 200 && net_error == net::OK &&
++             (mime == "text/plain" || mime == "application/octet-stream") &&
++             file == staging_.AppendASCII(std::string(kFiles[index]) + ".download")) {
++    base::ThreadPool::PostTaskAndReplyWithResult(FROM_HERE, {base::MayBlock()},
++        base::BindOnce(&base::Move, file, staging_.AppendASCII(kFiles[index])),
++        base::BindOnce(&SendaFilterUpdater::SourceReady, operation_.GetWeakPtr(), index));
++  } else { Fail(); }
++}
++void SendaFilterUpdater::OnCachedCopied(size_t index, bool success) {
++  if (!success) { Download(index, false); return; }
++  SourceReady(index, true);
++}
++void SendaFilterUpdater::SourceReady(size_t index, bool success) {
++  if (!success) { Fail(); return; }
++  if (index == 0) { Download(1, true); return; }
++  base::ThreadPool::PostTaskAndReplyWithResult(FROM_HERE, {base::MayBlock()},
++      base::BindOnce(&SendaFilterUpdater::HashSources, staging_),
++      base::BindOnce(&SendaFilterUpdater::OnHashes, operation_.GetWeakPtr()));
++}
++SendaFilterUpdater::SourceHashes SendaFilterUpdater::HashSources(base::FilePath directory) {
++  SourceHashes result;
++  for (size_t i = 0; i < 2; ++i) {
++    std::string text;
++    if (!base::ReadFileToStringWithMaxSize(directory.AppendASCII(kFiles[i]), &text, kSourceLimit) || text.size() < 1024) { return result; }
++    result.hashes[i] = Hash(text);
++  }
++  result.valid = true;
++  return result;
++}
++void SendaFilterUpdater::OnHashes(SourceHashes hashes) {
++  if (!hashes.valid) { Fail(); return; }
++  source_hashes_ = std::move(hashes);
++  if (active_ && source_hashes_.hashes[0] == active_->sources[0].sha256 &&
++      source_hashes_.hashes[1] == active_->sources[1].sha256) {
++    if (active_->sources[0].version < MinimumVersion(0) || active_->sources[1].version < MinimumVersion(1)) {
++      Fail(); return;
++    }
++    store_.AsyncCall(&SendaFilterStore::Recover).Then(
++        base::BindOnce(&SendaFilterUpdater::OnUnchangedCacheChecked, operation_.GetWeakPtr()));
++  } else { CompileCandidate(); }
++}
++void SendaFilterUpdater::OnUnchangedCacheChecked(RecoveryResult recovered) {
++  if (active_ && std::ranges::any_of(recovered.generations,
++      [this](const auto& generation) { return generation.id == active_->id; })) {
++    for (size_t i = 0; i < 2; ++i) {
++      active_->sources[i].etag = source_info_[i].etag;
++      active_->sources[i].last_modified = source_info_[i].last_modified;
++    }
++    Succeed(FilterUpdateOutcome::kUnchanged);
++  } else { CompileCandidate(); }
++}
++void SendaFilterUpdater::CompileCandidate() {
++  status_.phase = FilterUpdatePhase::kCompiling;
++  Notify();
++  base::ThreadPool::PostTaskAndReplyWithResult(FROM_HERE, {base::MayBlock()},
++      base::BindOnce(&SendaFilterUpdater::OpenCompilerFiles, staging_),
++      base::BindOnce(&SendaFilterUpdater::OnCompilerFiles, operation_.GetWeakPtr()));
++}
++SendaFilterUpdater::CompilerFiles SendaFilterUpdater::OpenCompilerFiles(base::FilePath directory) {
++  return {base::File(directory.AppendASCII(kFiles[0]), base::File::FLAG_OPEN | base::File::FLAG_READ),
++      base::File(directory.AppendASCII(kFiles[1]), base::File::FLAG_OPEN | base::File::FLAG_READ),
++      base::File(directory.AppendASCII("UnindexedRules"), base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_WRITE)};
++}
++void SendaFilterUpdater::OnCompilerFiles(CompilerFiles files) {
++  if (!files.first.IsValid() || !files.second.IsValid() || !files.output.IsValid()) { Fail(); return; }
++  compiler_timer_.Start(FROM_HERE, base::Seconds(60),
++      base::BindOnce(&SendaFilterUpdater::Fail, operation_.GetWeakPtr()));
++  compiler_.Run(std::move(files.first), std::move(files.second), std::move(files.output),
++      base::BindOnce(&SendaFilterUpdater::OnCompiled, operation_.GetWeakPtr()));
++}
++void SendaFilterUpdater::CancelCompiler() {
++  compiler_timer_.Stop();
++  if (!cancel_compiler_.is_null()) { cancel_compiler_.Run(); }
++}
++void SendaFilterUpdater::OnCompiled(CompileResult result) {
++  compiler_timer_.Stop();
++  if (result.status != CompileStatus::kSuccess || result.source_hashes != source_hashes_.hashes ||
++      result.network_rules < 1000) { Fail(); return; }
++  for (size_t i = 0; i < 2; ++i) {
++    if (result.versions[i] < MinimumVersion(i)) { Fail(); return; }
++    source_info_[i].version = result.versions[i]; source_info_[i].sha256 = result.source_hashes[i];
++  }
++  GenerationManifest manifest;
++  manifest.sources = source_info_;
++  manifest.ruleset_sha256 = result.ruleset_sha256;
++  manifest.license_sha256 = Hash(bundled_.license);
++  base::ThreadPool::PostTaskAndReplyWithResult(FROM_HERE, {base::MayBlock()},
++      base::BindOnce([](base::FilePath directory, std::string license, GenerationManifest manifest)
++          -> std::optional<GenerationManifest> {
++        if (!WriteLicense(directory, std::move(license))) { return std::nullopt; }
++        const auto size = base::GetFileSize(directory.AppendASCII("UnindexedRules"));
++        if (!size || *size < 1024 || static_cast<uint64_t>(*size) > kSourceLimit) { return std::nullopt; }
++        manifest.ruleset_bytes = *size;
++        return manifest;
++      }, staging_, bundled_.license, std::move(manifest)),
++      base::BindOnce([](base::WeakPtr<SendaFilterUpdater> self, std::optional<GenerationManifest> manifest) {
++        if (!self) { return; }
++        if (!manifest) { self->Fail(); return; }
++        self->store_.AsyncCall(&SendaFilterStore::Stage).WithArgs(std::move(*manifest), self->staging_)
++            .Then(base::BindOnce(&SendaFilterUpdater::OnStaged, self));
++      }, operation_.GetWeakPtr()));
++}
++void SendaFilterUpdater::OnStaged(StageResult result) {
++  if (!result.generation) { Fail(); return; }
++  candidate_ = std::move(result.generation);
++  prior_ = active_;
++  status_.phase = FilterUpdatePhase::kPublishing;
++  Notify();
++  publisher_.Run(candidate_, base::BindOnce(&SendaFilterUpdater::OnPublished,
++      operation_.GetWeakPtr(), candidate_->id));
++}
++void SendaFilterUpdater::OnPublished(std::string expected, std::string actual, bool success) {
++  if (!success || actual != expected) { Fail(); return; }
++  active_ = candidate_;
++  status_.versions = {active_->sources[0].version, active_->sources[1].version};
++  status_.generation_id = active_->id;
++  store_.AsyncCall(&SendaFilterStore::CommitActive).WithArgs(active_->id).Then(
++      base::BindOnce(&SendaFilterUpdater::OnCommitted, operation_.GetWeakPtr()));
++}
++void SendaFilterUpdater::OnCommitted(bool success) {
++  if (success) { Succeed(FilterUpdateOutcome::kUpdated); return; }
++  status_.persistence_error = true;
++  publisher_.Run(prior_, base::BindOnce(&SendaFilterUpdater::OnRolledBack, operation_.GetWeakPtr()));
++}
++void SendaFilterUpdater::OnRolledBack(std::string actual, bool success) {
++  if (success && actual == (prior_ ? prior_->id : std::string())) {
++    active_ = prior_;
++    status_.versions = active_ ? std::array{active_->sources[0].version, active_->sources[1].version} : bundled_.versions;
++    status_.generation_id = active_ ? active_->id : std::string();
++    status_.persistence_error = false;
++  }
++  Fail();
++}
++void SendaFilterUpdater::SaveValidators() {
++  if (!active_) { return; }
++  base::DictValue validators;
++  auto versions = prefs_->GetDict(kVersions).Clone();
++  for (size_t i = 0; i < 2; ++i) {
++    const auto& source = active_->sources[i];
++    base::DictValue info;
++    info.Set("sha256", source.sha256); info.Set("etag", source.etag); info.Set("last_modified", source.last_modified);
++    validators.Set(kFiles[i], std::move(info));
++    const auto* floor = versions.FindString(kFiles[i]);
++    if (!floor || *floor < source.version) { versions.Set(kFiles[i], source.version); }
++  }
++  prefs_->SetDict(kValidators, std::move(validators));
++  prefs_->SetDict(kVersions, std::move(versions));
++}
++void SendaFilterUpdater::LoadValidators() {
++  if (!active_) { return; }
++  const auto& validators = prefs_->GetDict(kValidators);
++  for (size_t i = 0; i < 2; ++i) {
++    const auto* info = validators.FindDict(kFiles[i]);
++    if (!info) { continue; }
++    const auto* hash = info->FindString("sha256");
++    if (!hash || *hash != active_->sources[i].sha256) { continue; }
++    if (const auto* etag = info->FindString("etag")) { active_->sources[i].etag = HttpValidator(*etag); }
++    if (const auto* modified = info->FindString("last_modified")) { active_->sources[i].last_modified = HttpValidator(*modified); }
++  }
++}
++void SendaFilterUpdater::Succeed(FilterUpdateOutcome outcome) {
++  SaveValidators();
++  prefs_->SetInteger(kFailures, 0);
++  prefs_->SetTime(kRetryAfter, base::Time());
++  prefs_->SetInteger(kOutcome, static_cast<int>(outcome));
++  status_.outcome = outcome;
++  status_.phase = FilterUpdatePhase::kIdle;
++  operation_.InvalidateWeakPtrs();
++  if (!staging_.empty()) { store_.AsyncCall(base::IgnoreResult(&SendaFilterStore::DiscardStaging)).WithArgs(staging_); }
++  store_.AsyncCall(&SendaFilterStore::Prune);
++  Notify(); Schedule();
++}
++void SendaFilterUpdater::Fail() {
++  operation_.InvalidateWeakPtrs();
++  loader_.reset(); CancelCompiler();
++  status_.outcome = FilterUpdateOutcome::kError;
++  status_.phase = FilterUpdatePhase::kIdle;
++  const auto failures = std::clamp(prefs_->GetInteger(kFailures), 0, 2) + 1;
++  prefs_->SetInteger(kFailures, failures);
++  prefs_->SetTime(kRetryAfter, base::Time::Now() +
++      (failures == 1 ? base::Hours(1) : failures == 2 ? base::Hours(6) : base::Days(1)));
++  prefs_->SetInteger(kOutcome, static_cast<int>(FilterUpdateOutcome::kError));
++  if (!staging_.empty()) { store_.AsyncCall(base::IgnoreResult(&SendaFilterStore::DiscardStaging)).WithArgs(staging_); }
++  Notify(); Schedule();
++}
++}  // namespace subresource_filter
+diff --git a/chrome/browser/subresource_filter/senda_filter_updater_unittest.cc b/chrome/browser/subresource_filter/senda_filter_updater_unittest.cc
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/subresource_filter/senda_filter_updater_unittest.cc
+@@ -0,0 +1,273 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#include "chrome/browser/subresource_filter/senda_filter_updater.h"
++#include "base/files/file_util.h"
++#include "base/files/scoped_temp_dir.h"
++#include "base/files/important_file_writer.h"
++#include "base/functional/bind.h"
++#include "base/test/task_environment.h"
++#include "components/prefs/testing_pref_service.h"
++#include "components/subresource_filter/tools/rule_parser/senda_filter_compiler.h"
++#include "net/http/http_response_headers.h"
++#include "net/base/net_errors.h"
++#include "net/url_request/redirect_info.h"
++#include "services/network/public/cpp/resource_request.h"
++#include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
++#include "services/network/public/mojom/url_response_head.mojom.h"
++#include "services/network/test/test_url_loader_factory.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace subresource_filter {
++namespace {
++constexpr std::array<const char*, 2> kUrls = {
++  "https://easylist.to/easylist/easylist.txt",
++  "https://easylist.to/easylist/easyprivacy.txt"};
++std::string List(size_t index, std::string version = "202611170028",
++                 std::string extra = "") {
++  std::string text = "[Adblock Plus 2.0]\n! Title: " +
++      std::string(index ? "EasyPrivacy" : "EasyList") + "\n! Version: " + version + "\n";
++  for (int i = 0; i < 600; ++i) { text += "||ad" + std::to_string(i) + ".test^\n"; }
++  return text + extra;
++}
++class SendaUpdaterTest : public testing::Test {
++ protected:
++  void SetUp() override {
++    ASSERT_TRUE(directory_.CreateUniqueTempDir());
++    SendaFilterUpdater::RegisterLocalStatePrefs(prefs_.registry());
++    CreateUpdater();
++  }
++  void CreateUpdater() {
++    BundledFilterSnapshot bundled;
++    bundled.versions = {"202611160028", "202611160028"};
++    bundled.content_version = "senda-bundle";
++    bundled.license = "The EasyList authors CC-BY-SA-3.0";
++    updater_ = std::make_unique<SendaFilterUpdater>(
++        &prefs_, directory_.GetPath(), factory_.GetSafeWeakWrapper(), std::move(bundled),
++        base::BindRepeating(&SendaUpdaterTest::Publish, base::Unretained(this)),
++        base::BindRepeating(&SendaUpdaterTest::Compile, base::Unretained(this)),
++        base::RepeatingClosure(), writer_);
++    updater_->Start();
++    tasks_.RunUntilIdle();
++    publications_.clear();
++  }
++  void TearDown() override { updater_.reset(); tasks_.RunUntilIdle(); }
++  void Response(size_t index, std::string text, int code = 200) {
++    auto head = network::mojom::URLResponseHead::New();
++    head->mime_type = "text/plain";
++    head->headers = net::HttpResponseHeaders::TryToCreate(
++        "HTTP/1.1 " + std::to_string(code) + " Fixture\r\nContent-Type: text/plain\r\nETag: \"fixture\"\r\n\r\n");
++    factory_.AddResponse(GURL(kUrls[index]), std::move(head), text,
++                         network::URLLoaderCompletionStatus(net::OK));
++  }
++  void Compile(base::File first, base::File second, base::File output,
++               SendaFilterUpdater::CompileCompletion done) {
++    ++compiles_;
++    std::move(done).Run(CompileSendaFilters(std::move(first), std::move(second), std::move(output)));
++  }
++  void Publish(const std::optional<GenerationManifest>& manifest,
++               SendaFilterUpdater::PublishCompletion done) {
++    const auto id = manifest ? manifest->id : std::string();
++    publications_.push_back(id);
++    std::move(done).Run(wrong_ack_ ? "wrong-generation" : id, !fail_publish_);
++  }
++  void Check() { updater_->CheckNow(); tasks_.RunUntilIdle(); }
++  void Restart() { updater_.reset(); tasks_.RunUntilIdle(); CreateUpdater(); }
++  void RespondOnSecondFirstSourceRequest(const network::ResourceRequest& request) {
++    if (request.url == GURL(kUrls[0]) && ++first_requests_ == 2) { Response(0, List(0)); }
++  }
++  void RefetchOnSecondRequest() {
++    factory_.SetInterceptor(base::BindRepeating(
++        &SendaUpdaterTest::RespondOnSecondFirstSourceRequest, base::Unretained(this)));
++  }
++  base::test::TaskEnvironment tasks_{base::test::TaskEnvironment::TimeSource::MOCK_TIME};
++  base::ScopedTempDir directory_;
++  TestingPrefServiceSimple prefs_;
++  network::TestURLLoaderFactory factory_;
++  SendaFilterStore::AtomicWriter writer_;
++  std::unique_ptr<SendaFilterUpdater> updater_;
++  int compiles_ = 0;
++  bool fail_publish_ = false, wrong_ack_ = false;
++  size_t first_requests_ = 0;
++  std::vector<std::string> publications_;
++};
++
++TEST_F(SendaUpdaterTest, UpdatesAtomicallyAndReusesNotModifiedSources) {
++  Response(0, List(0)); Response(1, List(1));
++  Check();
++  ASSERT_EQ(FilterUpdateOutcome::kUpdated, updater_->GetStatus().outcome);
++  EXPECT_EQ(1, compiles_);
++  ASSERT_EQ(1u, publications_.size());
++  Response(0, "", 304); Response(1, "", 304);
++  Check();
++  EXPECT_EQ(FilterUpdateOutcome::kUnchanged, updater_->GetStatus().outcome);
++  EXPECT_EQ(1, compiles_);
++  EXPECT_EQ(1u, publications_.size());
++}
++TEST_F(SendaUpdaterTest, ManualWorksWithAutomaticOffAndCoalescesRequests) {
++  updater_->SetAutomaticUpdates(false);
++  tasks_.FastForwardBy(base::Days(2));
++  EXPECT_EQ(0, factory_.NumPending());
++  updater_->CheckNow(); updater_->CheckNow();
++  tasks_.RunUntilIdle();
++  EXPECT_EQ(1, factory_.NumPending());
++  Response(0, List(0)); Response(1, List(1));
++  tasks_.RunUntilIdle();
++  EXPECT_EQ(1, compiles_);
++  EXPECT_FALSE(updater_->GetStatus().automatic);
++}
++TEST_F(SendaUpdaterTest, InvalidSourceOrWrongPublicationCannotBecomeActive) {
++  Response(0, "<html>failure</html>"); Response(1, List(1));
++  Check();
++  EXPECT_EQ(FilterUpdateOutcome::kError, updater_->GetStatus().outcome);
++  EXPECT_TRUE(publications_.empty());
++  Response(0, List(0)); wrong_ack_ = true;
++  Check();
++  EXPECT_EQ(FilterUpdateOutcome::kError, updater_->GetStatus().outcome);
++  EXPECT_EQ("202611160028", updater_->GetStatus().versions[0]);
++}
++TEST_F(SendaUpdaterTest, ExceptionOnlyChangesActivateButSourceRollbackIsRejected) {
++  Response(0, List(0)); Response(1, List(1)); Check();
++  const auto previous = updater_->GetStatus().generation_id;
++  Response(0, List(0, "202611170028", "@@||keep.test^$generichide\n"));
++  Check();
++  EXPECT_EQ(FilterUpdateOutcome::kUpdated, updater_->GetStatus().outcome);
++  EXPECT_NE(previous, updater_->GetStatus().generation_id);
++  Response(0, List(0, "202611150028")); Check();
++  EXPECT_EQ(FilterUpdateOutcome::kError, updater_->GetStatus().outcome);
++  EXPECT_EQ("202611170028", updater_->GetStatus().versions[0]);
++}
++TEST_F(SendaUpdaterTest, RequestsOmitCredentialsAndReferrer) {
++  factory_.SetInterceptor(base::BindRepeating([](const network::ResourceRequest& request) {
++    EXPECT_EQ(network::mojom::CredentialsMode::kOmit, request.credentials_mode);
++    EXPECT_TRUE(request.referrer.is_empty());
++    EXPECT_FALSE(request.headers.HasHeader("Cookie"));
++    EXPECT_TRUE(request.url == GURL(kUrls[0]) || request.url == GURL(kUrls[1]));
++  }));
++  Response(0, List(0)); Response(1, List(1)); Check();
++  EXPECT_EQ(FilterUpdateOutcome::kUpdated, updater_->GetStatus().outcome);
++}
++TEST_F(SendaUpdaterTest, LostCacheRefetchesAndRepairsTheSameGeneration) {
++  Response(0, List(0)); Response(1, List(1)); Check();
++  const auto id = updater_->GetStatus().generation_id;
++  const auto source = directory_.GetPath().AppendASCII("SendaFilterLists").AppendASCII(id).AppendASCII("easylist.txt");
++  ASSERT_TRUE(base::DeleteFile(source));
++  Response(0, "", 304); Response(1, "", 304);
++  RefetchOnSecondRequest();
++  Check();
++  EXPECT_EQ(2u, first_requests_);
++  EXPECT_TRUE(base::PathExists(source));
++  EXPECT_EQ(id, updater_->GetStatus().generation_id);
++  EXPECT_EQ(FilterUpdateOutcome::kUpdated, updater_->GetStatus().outcome);
++}
++TEST_F(SendaUpdaterTest, Unexpected304WithoutAnyCacheRefetchesOnlyOnce) {
++  Response(0, "", 304); Response(1, List(1));
++  RefetchOnSecondRequest();
++  Check();
++  EXPECT_EQ(2u, first_requests_);
++  EXPECT_EQ(FilterUpdateOutcome::kUpdated, updater_->GetStatus().outcome);
++}
++TEST_F(SendaUpdaterTest, TimeoutRetriesOneHourAfterFailure) {
++  Check();
++  ASSERT_EQ(1, factory_.NumPending());
++  tasks_.FastForwardBy(base::Seconds(60));
++  EXPECT_EQ(FilterUpdateOutcome::kError, updater_->GetStatus().outcome);
++  tasks_.FastForwardBy(base::Hours(1) - base::Seconds(1));
++  EXPECT_EQ(0, factory_.NumPending());
++  tasks_.FastForwardBy(base::Seconds(1));
++  EXPECT_EQ(1, factory_.NumPending());
++}
++TEST_F(SendaUpdaterTest, HttpErrorsBackOffOneSixAndTwentyFourHours) {
++  factory_.SetInterceptor(base::BindRepeating([](size_t* count, const network::ResourceRequest&) {
++    ++*count;
++  }, &first_requests_));
++  Response(0, "error", 500); Check();
++  EXPECT_EQ(1u, first_requests_);
++  tasks_.FastForwardBy(base::Hours(1)); EXPECT_EQ(2u, first_requests_);
++  tasks_.FastForwardBy(base::Hours(6)); EXPECT_EQ(3u, first_requests_);
++  tasks_.FastForwardBy(base::Days(1)); EXPECT_EQ(4u, first_requests_);
++  EXPECT_TRUE(publications_.empty());
++}
++TEST_F(SendaUpdaterTest, RestartsOfflineWithAutomaticDisabled) {
++  Response(0, List(0)); Response(1, List(1)); Check();
++  const auto id = updater_->GetStatus().generation_id;
++  updater_->SetAutomaticUpdates(false);
++  factory_.ClearResponses(); Restart();
++  EXPECT_EQ(id, updater_->GetStatus().generation_id);
++  EXPECT_EQ("202611170028", updater_->GetStatus().versions[0]);
++  EXPECT_FALSE(updater_->GetStatus().automatic);
++  EXPECT_EQ(0, factory_.NumPending());
++}
++TEST_F(SendaUpdaterTest, RecoveryCannotMakeAnOlder304CountAsCurrent) {
++  Response(0, List(0)); Response(1, List(1)); Check();
++  const auto previous = updater_->GetStatus().generation_id;
++  Response(0, List(0, "202611180028")); Response(1, List(1, "202611180028")); Check();
++  const auto latest = updater_->GetStatus().generation_id;
++  ASSERT_NE(previous, latest);
++  ASSERT_TRUE(base::WriteFile(directory_.GetPath().AppendASCII("SendaFilterLists")
++      .AppendASCII(latest).AppendASCII("UnindexedRules"), "corrupt"));
++  updater_->SetAutomaticUpdates(false); Restart();
++  ASSERT_EQ(previous, updater_->GetStatus().generation_id);
++  Response(0, "", 304); Response(1, "", 304); Check();
++  EXPECT_EQ(FilterUpdateOutcome::kError, updater_->GetStatus().outcome);
++}
++TEST_F(SendaUpdaterTest, DestructionCancelsPendingRequests) {
++  Check(); ASSERT_EQ(1, factory_.NumPending());
++  updater_.reset(); tasks_.RunUntilIdle();
++  Response(0, List(0)); tasks_.RunUntilIdle();
++  EXPECT_EQ(0, factory_.NumPending());
++  EXPECT_EQ(0, compiles_);
++}
++TEST_F(SendaUpdaterTest, CertificateFailureCannotPublish) {
++  factory_.AddResponse(GURL(kUrls[0]), nullptr, "",
++      network::URLLoaderCompletionStatus(net::ERR_CERT_DATE_INVALID));
++  Check();
++  EXPECT_EQ(FilterUpdateOutcome::kError, updater_->GetStatus().outcome);
++  EXPECT_TRUE(publications_.empty());
++}
++TEST_F(SendaUpdaterTest, RedirectsCannotChangePinnedHttpsDestination) {
++  auto head = network::mojom::URLResponseHead::New();
++  head->mime_type = "text/plain";
++  head->headers = net::HttpResponseHeaders::TryToCreate("HTTP/1.1 200 OK\r\n\r\n");
++  auto redirect_head = network::mojom::URLResponseHead::New();
++  redirect_head->headers = net::HttpResponseHeaders::TryToCreate("HTTP/1.1 302 Found\r\n\r\n");
++  net::RedirectInfo redirect;
++  redirect.new_url = GURL("http://untrusted.test/list.txt");
++  network::TestURLLoaderFactory::Redirects redirects;
++  redirects.emplace_back(redirect, std::move(redirect_head));
++  factory_.AddResponse(GURL(kUrls[0]), std::move(head), List(0),
++      network::URLLoaderCompletionStatus(net::OK), std::move(redirects));
++  Check();
++  EXPECT_EQ(FilterUpdateOutcome::kError, updater_->GetStatus().outcome);
++  EXPECT_TRUE(publications_.empty());
++}
++TEST_F(SendaUpdaterTest, OversizedDownloadedBodyCannotPublish) {
++  Response(0, std::string(20 * 1024 * 1024 + 1, 'a'));
++  Check();
++  EXPECT_EQ(FilterUpdateOutcome::kError, updater_->GetStatus().outcome);
++  EXPECT_EQ(0, compiles_);
++  EXPECT_TRUE(publications_.empty());
++}
++TEST_F(SendaUpdaterTest, PublicationFailureKeepsBundledVersion) {
++  fail_publish_ = true;
++  Response(0, List(0)); Response(1, List(1)); Check();
++  EXPECT_EQ(FilterUpdateOutcome::kError, updater_->GetStatus().outcome);
++  EXPECT_TRUE(updater_->GetStatus().generation_id.empty());
++  EXPECT_EQ("202611160028", updater_->GetStatus().versions[0]);
++}
++TEST_F(SendaUpdaterTest, FailedPointerWriteRollsBackConfirmedPublication) {
++  writer_ = base::BindRepeating([](const base::FilePath& path, std::string_view text) {
++    return path.BaseName().MaybeAsASCII() != "active.json" &&
++        base::ImportantFileWriter::WriteFileAtomically(path, text);
++  });
++  Restart();
++  Response(0, List(0)); Response(1, List(1)); Check();
++  ASSERT_EQ(2u, publications_.size());
++  EXPECT_FALSE(publications_[0].empty());
++  EXPECT_TRUE(publications_[1].empty());
++  EXPECT_EQ(FilterUpdateOutcome::kError, updater_->GetStatus().outcome);
++  EXPECT_TRUE(updater_->GetStatus().generation_id.empty());
++  EXPECT_EQ("202611160028", updater_->GetStatus().versions[0]);
++  EXPECT_FALSE(updater_->GetStatus().persistence_error);
++}
++}  // namespace
++}  // namespace subresource_filter
+diff --git a/chrome/browser/subresource_filter/senda_filter_updates_test_main.cc b/chrome/browser/subresource_filter/senda_filter_updates_test_main.cc
+--- a/chrome/browser/subresource_filter/senda_filter_updates_test_main.cc
++++ b/chrome/browser/subresource_filter/senda_filter_updates_test_main.cc
+@@ -2,10 +2,14 @@
+ // Use of this source code is governed by a BSD-style license.
+ #include "base/at_exit.h"
+ #include "base/command_line.h"
++#include "base/test/test_timeouts.h"
++#include "mojo/core/embedder/embedder.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+ int main(int argc, char** argv) {
+   base::AtExitManager at_exit;
+   base::CommandLine::Init(argc, argv);
++  TestTimeouts::Initialize();
++  mojo::core::Init();
+   testing::InitGoogleTest(&argc, argv);
+   return RUN_ALL_TESTS();
+ }
+diff --git a/chrome/browser/subresource_filter/senda_filter_compiler_process.h b/chrome/browser/subresource_filter/senda_filter_compiler_process.h
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/subresource_filter/senda_filter_compiler_process.h
+@@ -0,0 +1,37 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#ifndef CHROME_BROWSER_SUBRESOURCE_FILTER_SENDA_FILTER_COMPILER_PROCESS_H_
++#define CHROME_BROWSER_SUBRESOURCE_FILTER_SENDA_FILTER_COMPILER_PROCESS_H_
++#include "base/functional/callback.h"
++#include "base/memory/weak_ptr.h"
++#include "base/process/process.h"
++#include <optional>
++#include "components/subresource_filter/content/mojom/senda_filter_compiler.mojom.h"
++#include "components/subresource_filter/tools/rule_parser/senda_filter_compiler.h"
++#include "mojo/public/cpp/bindings/remote.h"
++namespace subresource_filter {
++// UI-sequence adapter. Owns only the utility process launched for this job.
++class SendaFilterCompilerProcess {
++ public:
++  using Completion = base::OnceCallback<void(CompileResult)>;
++  SendaFilterCompilerProcess();
++  ~SendaFilterCompilerProcess();
++  void Compile(base::File first, base::File second, base::File output, Completion done);
++  void Cancel();
++ private:
++  void OnLaunched(uint64_t job, const base::Process& process);
++  void OnReply(senda::mojom::FilterCompileResultPtr reply);
++  void OnDisconnected();
++  void StopCompletedWorker();
++  void OnStopped(Completion done, CompileResult result, bool stopped);
++  Completion pending_;
++  mojo::Remote<senda::mojom::FilterCompiler> remote_;
++  base::Process process_;
++  std::optional<CompileResult> received_;
++  uint64_t job_ = 0;
++  bool canceled_ = true;
++  base::WeakPtrFactory<SendaFilterCompilerProcess> lifetime_{this};
++  base::WeakPtrFactory<SendaFilterCompilerProcess> weak_{this};
++};
++}  // namespace subresource_filter
++#endif
+diff --git a/chrome/browser/subresource_filter/senda_filter_compiler_process.cc b/chrome/browser/subresource_filter/senda_filter_compiler_process.cc
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/subresource_filter/senda_filter_compiler_process.cc
+@@ -0,0 +1,94 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#include "chrome/browser/subresource_filter/senda_filter_compiler_process.h"
++#include <utility>
++#include "base/functional/bind.h"
++#include "base/task/thread_pool.h"
++#include "content/public/browser/service_process_host.h"
++namespace subresource_filter {
++namespace {
++bool StopWorker(base::Process process) {
++  int exit_code = 0;
++  if (process.WaitForExitWithTimeout(base::TimeDelta(), &exit_code)) { return true; }
++  process.Terminate(0, false);
++  return process.WaitForExitWithTimeout(base::Seconds(5), &exit_code);
++}
++}  // namespace
++SendaFilterCompilerProcess::SendaFilterCompilerProcess() = default;
++SendaFilterCompilerProcess::~SendaFilterCompilerProcess() { Cancel(); }
++void SendaFilterCompilerProcess::Compile(base::File first, base::File second,
++                                         base::File output, Completion done) {
++  Cancel();
++  canceled_ = false;
++  pending_ = std::move(done);
++  remote_ = content::ServiceProcessHost::Launch<senda::mojom::FilterCompiler>(
++      content::ServiceProcessHost::Options().WithDisplayName(u"Listas de protecciÃ³n de Senda")
++          .WithProcessCallback(base::BindOnce(
++              [](base::WeakPtr<SendaFilterCompilerProcess> self, uint64_t job,
++                 const base::Process& process) {
++                if (self) { self->OnLaunched(job, process); }
++                else { process.Duplicate().Terminate(1, false); }
++              }, lifetime_.GetWeakPtr(), job_)).Pass());
++  remote_.set_disconnect_handler(base::BindOnce(&SendaFilterCompilerProcess::OnDisconnected, weak_.GetWeakPtr()));
++  remote_->Compile(std::move(first), std::move(second), std::move(output),
++      base::BindOnce(&SendaFilterCompilerProcess::OnReply, weak_.GetWeakPtr()));
++}
++void SendaFilterCompilerProcess::OnLaunched(uint64_t job, const base::Process& process) {
++  if (job != job_ || canceled_) { process.Duplicate().Terminate(1, false); return; }
++  process_ = process.Duplicate();
++  if (received_) { StopCompletedWorker(); }
++}
++void SendaFilterCompilerProcess::OnDisconnected() {
++  if (received_) { return; }
++  auto done = std::move(pending_);
++  Cancel();
++  if (done) { std::move(done).Run(CompileResult()); }
++}
++void SendaFilterCompilerProcess::OnReply(senda::mojom::FilterCompileResultPtr reply) {
++  CompileResult result;
++  if (reply && reply->versions.size() == 2 && reply->source_hashes.size() == 2) {
++    switch (reply->status) {
++      case senda::mojom::FilterCompileStatus::kSuccess: result.status = CompileStatus::kSuccess; break;
++      case senda::mojom::FilterCompileStatus::kInvalidSource: result.status = CompileStatus::kInvalidSource; break;
++      case senda::mojom::FilterCompileStatus::kLimitExceeded: result.status = CompileStatus::kLimitExceeded; break;
++      case senda::mojom::FilterCompileStatus::kWriteFailure: result.status = CompileStatus::kWriteFailure; break;
++    }
++    for (size_t i = 0; i < 2; ++i) {
++      result.versions[i] = reply->versions[i]; result.source_hashes[i] = reply->source_hashes[i];
++    }
++    result.ruleset_sha256 = reply->ruleset_sha256;
++    result.network_rules = reply->network_rules;
++    result.cosmetic_rules = reply->cosmetic_rules;
++  }
++  received_ = std::move(result);
++  remote_.reset();
++  if (process_.IsValid()) { StopCompletedWorker(); }
++}
++void SendaFilterCompilerProcess::StopCompletedWorker() {
++  auto done = std::move(pending_);
++  auto result = std::move(*received_);
++  received_.reset();
++  canceled_ = true;
++  weak_.InvalidateWeakPtrs();
++  // A utility reply alone does not revoke its writable output handle. Stop
++  // our dedicated worker before the parent validates/indexes that file.
++  base::ThreadPool::PostTaskAndReplyWithResult(FROM_HERE,
++      {base::MayBlock(), base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
++      base::BindOnce(&StopWorker, std::move(process_)),
++      base::BindOnce(&SendaFilterCompilerProcess::OnStopped, weak_.GetWeakPtr(),
++          std::move(done), std::move(result)));
++}
++void SendaFilterCompilerProcess::OnStopped(Completion done, CompileResult result, bool stopped) {
++  if (!stopped) { result.status = CompileStatus::kWriteFailure; }
++  if (done) { std::move(done).Run(std::move(result)); }
++}
++void SendaFilterCompilerProcess::Cancel() {
++  ++job_;
++  canceled_ = true;
++  received_.reset();
++  weak_.InvalidateWeakPtrs();
++  pending_.Reset();
++  remote_.reset();
++  if (process_.IsValid()) { process_.Terminate(1, false); process_.Close(); }
++}
++}  // namespace subresource_filter
+diff --git a/components/subresource_filter/core/common/BUILD.gn b/components/subresource_filter/core/common/BUILD.gn
+--- a/components/subresource_filter/core/common/BUILD.gn
++++ b/components/subresource_filter/core/common/BUILD.gn
+@@ -42,6 +42,8 @@
+     "style_rule_matcher.h",
+     "time_measurements.cc",
+     "time_measurements.h",
++    "senda_ruleset_validator.cc",
++    "senda_ruleset_validator.h",
+     "unindexed_ruleset.cc",
+     "unindexed_ruleset.h",
+   ]
+diff --git a/components/subresource_filter/core/common/constants.h b/components/subresource_filter/core/common/constants.h
+--- a/components/subresource_filter/core/common/constants.h
++++ b/components/subresource_filter/core/common/constants.h
+@@ -13,6 +13,7 @@
+ // RulesetService. Encompasses a ruleset tag and top level directory name where
+ // the ruleset should be stored.
+ extern const RulesetConfig kSafeBrowsingRulesetConfig;
++extern const RulesetConfig kSendaRulesetConfig;
+ 
+ }  // namespace subresource_filter
+ 
+diff --git a/components/subresource_filter/core/common/constants.cc b/components/subresource_filter/core/common/constants.cc
+--- a/components/subresource_filter/core/common/constants.cc
++++ b/components/subresource_filter/core/common/constants.cc
+@@ -16,4 +16,11 @@
+     .top_level_directory = FILE_PATH_LITERAL("Subresource Filter"),
+     .uma_tag = std::string_view("SubresourceFilter")};
+ 
++// Separate ownership/prefs from Google's advertisement component. Reuse
++// existing metric names; Safe Browsing threat protection is independent.
++constexpr RulesetConfig kSendaRulesetConfig = {
++    .filter_tag = std::string_view("senda"),
++    .top_level_directory = FILE_PATH_LITERAL("Senda Filter Rules"),
++    .uma_tag = kSafeBrowsingRulesetConfig.uma_tag};
++
+ }  // namespace subresource_filter
+diff --git a/components/subresource_filter/core/common/unindexed_ruleset.h b/components/subresource_filter/core/common/unindexed_ruleset.h
+--- a/components/subresource_filter/core/common/unindexed_ruleset.h
++++ b/components/subresource_filter/core/common/unindexed_ruleset.h
+@@ -48,9 +48,11 @@
+ 
+   // Returns how many bytes of the |stream| have been consumed.
+   int num_bytes_read() const { return coded_stream_.CurrentPosition(); }
++  bool had_error() const { return had_error_; }
+ 
+  private:
+   google::protobuf::io::CodedInputStream coded_stream_;
++  bool had_error_ = false;
+ };
+ 
+ // Divides an unindexed ruleset into chunks and writes them into |stream|.
+diff --git a/components/subresource_filter/core/common/unindexed_ruleset.cc b/components/subresource_filter/core/common/unindexed_ruleset.cc
+--- a/components/subresource_filter/core/common/unindexed_ruleset.cc
++++ b/components/subresource_filter/core/common/unindexed_ruleset.cc
+@@ -3,6 +3,7 @@
+ // found in the LICENSE file.
+ 
+ #include "components/subresource_filter/core/common/unindexed_ruleset.h"
++#include <limits>
+ 
+ #include "base/check.h"
+ #include "base/check_op.h"
+@@ -24,12 +25,20 @@
+ UnindexedRulesetReader::~UnindexedRulesetReader() = default;
+ 
+ bool UnindexedRulesetReader::ReadNextChunk(proto::FilteringRules* chunk) {
++  const auto before = coded_stream_.CurrentPosition();
+   uint32_t chunk_size = 0;
+   if (!coded_stream_.ReadVarint32(&chunk_size)) {
++    had_error_ = coded_stream_.CurrentPosition() != before;
+     return false;
+   }
+-  auto limit = coded_stream_.PushLimit(chunk_size);
++  if (chunk_size > std::numeric_limits<int>::max()) {
++    had_error_ = true;
++    return false;
++  }
++  auto limit = coded_stream_.PushLimit(static_cast<int>(chunk_size));
+   if (!chunk->ParseFromCodedStream(&coded_stream_)) {
++    had_error_ = true;
++    coded_stream_.PopLimit(limit);
+     return false;
+   }
+   coded_stream_.PopLimit(limit);
+diff --git a/components/subresource_filter/core/common/senda_ruleset_validator.h b/components/subresource_filter/core/common/senda_ruleset_validator.h
+new file mode 100644
+--- /dev/null
++++ b/components/subresource_filter/core/common/senda_ruleset_validator.h
+@@ -0,0 +1,10 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#ifndef COMPONENTS_SUBRESOURCE_FILTER_CORE_COMMON_SENDA_RULESET_VALIDATOR_H_
++#define COMPONENTS_SUBRESOURCE_FILTER_CORE_COMMON_SENDA_RULESET_VALIDATOR_H_
++#include "base/containers/span.h"
++namespace subresource_filter {
++// Checks the compiler's bounded wire contract before browser-side indexing.
++bool ValidateSendaUnindexedRuleset(base::span<const uint8_t> data);
++}  // namespace subresource_filter
++#endif
+diff --git a/components/subresource_filter/core/common/senda_ruleset_validator.cc b/components/subresource_filter/core/common/senda_ruleset_validator.cc
+new file mode 100644
+--- /dev/null
++++ b/components/subresource_filter/core/common/senda_ruleset_validator.cc
+@@ -0,0 +1,102 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#include "components/subresource_filter/core/common/senda_ruleset_validator.h"
++#include <algorithm>
++#include <string_view>
++#include "base/strings/string_util.h"
++#include "components/url_pattern_index/proto/rules.pb.h"
++namespace subresource_filter {
++namespace {
++namespace proto = url_pattern_index::proto;
++constexpr size_t kFileLimit = 20 * 1024 * 1024;
++constexpr size_t kChunkLimit = 8 * 1024 * 1024;
++constexpr size_t kRuleLimit = 256 * 1024;
++constexpr size_t kMetadataLimit = 1024 * 1024;
++bool Varint(base::span<const uint8_t> bytes, size_t& offset, uint32_t& result) {
++  result = 0;
++  for (unsigned shift = 0; shift <= 28; shift += 7) {
++    if (offset == bytes.size()) { return false; }
++    const auto byte = bytes[offset++];
++    if (shift == 28 && (byte & 0xf0)) { return false; }
++    result |= static_cast<uint32_t>(byte & 127) << shift;
++    if (!(byte & 128)) { return true; }
++  }
++  return false;
++}
++bool Shape(base::span<const uint8_t> bytes) {
++  size_t offset = 0, rules = 0, metadata = 0;
++  while (offset < bytes.size()) {
++    uint32_t tag = 0, length = 0;
++    if (!Varint(bytes, offset, tag) || !Varint(bytes, offset, length) ||
++        length > bytes.size() - offset) { return false; }
++    if (tag == 10 || tag == 18) {
++      if (++rules > 64 || length > kRuleLimit) { return false; }
++    } else if (tag == 26) {
++      if (++metadata > 1 || length > kMetadataLimit) { return false; }
++    } else { return false; }
++    offset += length;
++  }
++  return true;
++}
++bool Text(std::string_view value) {
++  return value.size() <= 65536 && base::IsStringASCII(value) &&
++      std::ranges::none_of(value, [](unsigned char c) { return c < 32 || c == 127; });
++}
++bool Semantics(proto::RuleSemantics value) {
++  return value == proto::RULE_SEMANTICS_BLOCKLIST || value == proto::RULE_SEMANTICS_ALLOWLIST;
++}
++bool Metadata(const proto::CosmeticExceptions& metadata) {
++  size_t total = 0;
++  for (const auto* values : {&metadata.generic_domains(), &metadata.all_domains(),
++      &metadata.generic_prefixes(), &metadata.all_prefixes(),
++      &metadata.generic_url_substrings(), &metadata.all_url_substrings()}) {
++    if (values->size() > 16384) { return false; }
++    for (const auto& value : *values) {
++      total += value.size() + 8;
++      if (!Text(value) || total > kMetadataLimit) { return false; }
++    }
++  }
++  return true;
++}
++}  // namespace
++bool ValidateSendaUnindexedRuleset(base::span<const uint8_t> data) {
++  if (data.empty() || data.size() > kFileLimit) { return false; }
++  size_t offset = 0, network_rules = 0, style_rules = 0, metadata_count = 0;
++  while (offset < data.size()) {
++    uint32_t length = 0;
++    if (!Varint(data, offset, length) || !length || length > kChunkLimit ||
++        length > data.size() - offset) { return false; }
++    const auto bytes = data.subspan(offset, length);
++    if (!Shape(bytes)) { return false; }
++    proto::FilteringRules chunk;
++    if (!chunk.ParseFromArray(bytes.data(), bytes.size())) { return false; }
++    for (const auto& rule : chunk.url_rules()) {
++      if (++network_rules > 1000000 || rule.url_pattern().size() > 65536 ||
++          !Semantics(rule.semantics()) || rule.initiator_domains_size() > 8192 ||
++          rule.request_domains_size() > 8192 ||
++          rule.source_type() < proto::SOURCE_TYPE_ANY || rule.source_type() > proto::SOURCE_TYPE_FIRST_PARTY ||
++          (rule.url_pattern_type() != proto::URL_PATTERN_TYPE_SUBSTRING &&
++           rule.url_pattern_type() != proto::URL_PATTERN_TYPE_WILDCARDED)) { return false; }
++      for (const auto* domains : {&rule.initiator_domains(), &rule.request_domains()}) {
++        for (const auto& domain : *domains) { if (domain.domain().size() > 65536) { return false; } }
++      }
++    }
++    for (const auto& rule : chunk.style_rules()) {
++      if (++style_rules > 1000000 || !Text(rule.selector()) || rule.selector().empty() ||
++          rule.selector().find_first_of("{}@") != std::string::npos ||
++          rule.selector().contains("/*") || rule.selector().contains("*/") ||
++          !Semantics(rule.semantics()) || rule.domains_size() > 8192 ||
++          rule.classes_size() + rule.ids_size() > 16384) { return false; }
++      for (const auto* names : {&rule.classes(), &rule.ids()}) {
++        for (const auto& name : *names) { if (!Text(name)) { return false; } }
++      }
++      for (const auto& domain : rule.domains()) { if (domain.domain().size() > 65536) { return false; } }
++    }
++    if (chunk.has_cosmetic_exceptions()) {
++      if (++metadata_count != 1 || !Metadata(chunk.cosmetic_exceptions())) { return false; }
++    }
++    offset += length;
++  }
++  return network_rules >= 1000 && metadata_count == 1;
++}
++}  // namespace subresource_filter
+diff --git a/components/subresource_filter/core/common/senda_ruleset_validator_unittest.cc b/components/subresource_filter/core/common/senda_ruleset_validator_unittest.cc
+new file mode 100644
+--- /dev/null
++++ b/components/subresource_filter/core/common/senda_ruleset_validator_unittest.cc
+@@ -0,0 +1,80 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#include "components/subresource_filter/core/common/senda_ruleset_validator.h"
++#include "base/containers/span.h"
++#include "components/subresource_filter/core/common/unindexed_ruleset.h"
++#include "testing/gtest/include/gtest/gtest.h"
++#include "third_party/protobuf/src/google/protobuf/io/zero_copy_stream_impl_lite.h"
++namespace subresource_filter {
++namespace {
++namespace proto = url_pattern_index::proto;
++std::string Snapshot(std::string selector = ".ad") {
++  std::string data;
++  {
++    google::protobuf::io::StringOutputStream stream(&data);
++    UnindexedRulesetWriter writer(&stream);
++    for (int i = 0; i < 1000; ++i) {
++      proto::UrlRule rule;
++      rule.set_url_pattern("blocked" + std::to_string(i) + ".test");
++      rule.set_url_pattern_type(proto::URL_PATTERN_TYPE_SUBSTRING);
++      rule.set_semantics(proto::RULE_SEMANTICS_BLOCKLIST);
++      rule.set_source_type(proto::SOURCE_TYPE_ANY);
++      rule.set_anchor_left(proto::ANCHOR_TYPE_NONE);
++      rule.set_anchor_right(proto::ANCHOR_TYPE_NONE);
++      rule.set_element_types(proto::ELEMENT_TYPE_SCRIPT);
++      writer.AddUrlRule(rule);
++    }
++    proto::StyleRule style;
++    style.set_semantics(proto::RULE_SEMANTICS_BLOCKLIST);
++    style.set_selector(selector);
++    style.add_classes("ad");
++    writer.AddStyleRule(style);
++    writer.SetCosmeticExceptions(proto::CosmeticExceptions());
++    writer.Finish();
++  }
++  return data;
++}
++TEST(SendaArtifactTest, ValidNativeSnapshotPasses) {
++  EXPECT_TRUE(ValidateSendaUnindexedRuleset(base::as_byte_span(Snapshot())));
++}
++TEST(SendaArtifactTest, RejectsCorruptFramingAndTruncationWithoutAllocatingDeclaredSize) {
++  const std::string oversized = "\xff\xff\xff\xff\x0f";
++  EXPECT_FALSE(ValidateSendaUnindexedRuleset(base::as_byte_span(oversized)));
++  auto truncated = Snapshot(); truncated.pop_back();
++  EXPECT_FALSE(ValidateSendaUnindexedRuleset(base::as_byte_span(truncated)));
++}
++TEST(SendaArtifactTest, SelectorsCannotInjectDeclarationsOrImportsFromAUtilityReply) {
++  EXPECT_FALSE(ValidateSendaUnindexedRuleset(base::as_byte_span(Snapshot(".ad{} @import 'https://invalid.test/x';"))));
++}
++TEST(SendaArtifactTest, RejectsOversizedRuleCountsBeforeProtobufAllocation) {
++  proto::FilteringRules chunk;
++  for (int i = 0; i < 65; ++i) {
++    auto* rule = chunk.add_url_rules();
++    rule->set_url_pattern("extra.test");
++    rule->set_url_pattern_type(proto::URL_PATTERN_TYPE_SUBSTRING);
++    rule->set_semantics(proto::RULE_SEMANTICS_BLOCKLIST);
++    rule->set_source_type(proto::SOURCE_TYPE_ANY);
++    rule->set_anchor_left(proto::ANCHOR_TYPE_NONE);
++    rule->set_anchor_right(proto::ANCHOR_TYPE_NONE);
++    rule->set_element_types(proto::ELEMENT_TYPE_SCRIPT);
++  }
++  const auto payload = chunk.SerializeAsString();
++  std::string data = Snapshot();
++  {
++    google::protobuf::io::StringOutputStream stream(&data);
++    google::protobuf::io::CodedOutputStream coded(&stream);
++    coded.WriteVarint32(payload.size());
++    coded.WriteRaw(payload.data(), payload.size());
++  }
++  EXPECT_FALSE(ValidateSendaUnindexedRuleset(base::as_byte_span(data)));
++}
++TEST(SendaArtifactTest, GenericReaderRejectsAnOverflowingChunkLength) {
++  const std::string bytes = "\xff\xff\xff\xff\x0f";
++  google::protobuf::io::ArrayInputStream stream(bytes.data(), bytes.size());
++  UnindexedRulesetReader reader(&stream);
++  proto::FilteringRules chunk;
++  EXPECT_FALSE(reader.ReadNextChunk(&chunk));
++  EXPECT_TRUE(reader.had_error());
++}
++}  // namespace
++}  // namespace subresource_filter
+diff --git a/components/subresource_filter/content/browser/ruleset_service.h b/components/subresource_filter/content/browser/ruleset_service.h
+--- a/components/subresource_filter/content/browser/ruleset_service.h
++++ b/components/subresource_filter/content/browser/ruleset_service.h
+@@ -33,6 +33,8 @@
+ #include <stdint.h>
+ 
+ #include <memory>
++#include <optional>
++#include <string>
+ 
+ #include "base/files/file.h"
+ #include "base/files/file_path.h"
+@@ -189,6 +191,14 @@
+   // A packaged fallback is available before startup navigations. Retain it
+   // so a missing or corrupt persisted index can be rebuilt in this session.
+   void InstallBundledRuleset(const UnindexedRulesetInfo& info);
++  struct PublishResult {
++    std::string content_version;
++    bool success = false;
++  };
++  using PublishCallback = base::OnceCallback<void(PublishResult)>;
++  // Call after initial readiness and serialize requests. Completion identifies
++  // the exact version after opening, checksum verification, and publication.
++  void PublishRuleset(const UnindexedRulesetInfo& info, PublishCallback callback);
+   bool HasPublishedRuleset() const { return publisher_->HasPublishedRuleset(); }
+   base::CallbackListSubscription WhenRulesetReady(base::OnceClosure callback) {
+     return publisher_->WhenRulesetReady(std::move(callback));
+@@ -272,7 +282,13 @@
+                         const IndexedRulesetVersion& version);
+ 
+   void OpenAndPublishRuleset(const IndexedRulesetVersion& version);
+-  void OnRulesetSet(RulesetFilePtr file);
++  void OnRulesetSet(IndexedRulesetVersion version, RulesetFilePtr file);
++  void CandidateIndexed(std::string expected, PublishCallback callback,
++                         const IndexedRulesetVersion& version);
++  void OpenCandidate(IndexedRulesetVersion version, PublishCallback callback);
++  void CandidateOpened(IndexedRulesetVersion version, PublishCallback callback,
++                        RulesetFilePtr file);
++  void RecordPublication(const IndexedRulesetVersion& version);
+ 
+   const RulesetConfig config_;
+ 
+@@ -286,6 +302,9 @@
+   UnindexedRulesetInfo queued_unindexed_ruleset_info_;
+   UnindexedRulesetInfo bundled_fallback_;
+   bool bundled_retry_started_ = false;
++  bool candidate_in_flight_ = false;
++  std::optional<IndexedRulesetVersion> published_version_;
++  std::optional<IndexedRulesetVersion> previous_published_version_;
+   bool is_initialized_;
+ 
+   const base::FilePath indexed_ruleset_base_dir_;
+diff --git a/components/subresource_filter/content/browser/ruleset_service.cc b/components/subresource_filter/content/browser/ruleset_service.cc
+--- a/components/subresource_filter/content/browser/ruleset_service.cc
++++ b/components/subresource_filter/content/browser/ruleset_service.cc
+@@ -33,11 +33,13 @@
+ #include "components/subresource_filter/core/browser/subresource_filter_constants.h"
+ #include "components/subresource_filter/core/browser/subresource_filter_features.h"
+ #include "components/subresource_filter/core/common/common_features.h"
++#include "components/subresource_filter/core/common/constants.h"
+ #include "components/subresource_filter/core/common/copying_file_stream.h"
+ #include "components/subresource_filter/core/common/indexed_ruleset.h"
+ #include "components/subresource_filter/core/common/ruleset_config.h"
+ #include "components/subresource_filter/core/common/time_measurements.h"
+ #include "components/subresource_filter/core/common/unindexed_ruleset.h"
++#include "components/subresource_filter/core/common/senda_ruleset_validator.h"
+ #include "components/url_pattern_index/proto/rules.pb.h"
+ #include "content/public/browser/browser_task_traits.h"
+ #include "content/public/browser/browser_thread.h"
+@@ -252,12 +254,72 @@
+   CHECK(info.resource_id);
+   bundled_fallback_ = info;
+   bundled_retry_started_ = false;
++  const auto current = GetMostRecentlyIndexedVersion();
++  const bool keep_cached = current.IsValid() && current.IsCurrentFormatVersion();
+   // Do not wait for an idle/best-effort UI task when first navigation needs
+   // this resource. The already posted initialization task becomes a no-op.
+   if (!is_initialized_) {
+     FinishInitialization();
+   }
+-  IndexAndStoreAndPublishRulesetIfNeeded(info);
++  if (!keep_cached) {
++    IndexAndStoreAndPublishRulesetIfNeeded(info);
++  }
++}
++
++void RulesetService::PublishRuleset(const UnindexedRulesetInfo& info,
++                                    PublishCallback callback) {
++  if (info.content_version.empty() || !published_version_ || candidate_in_flight_) {
++    std::move(callback).Run({info.content_version, false});
++    return;
++  }
++  if (published_version_->content_version == info.content_version) {
++    std::move(callback).Run({info.content_version, true});
++    return;
++  }
++  candidate_in_flight_ = true;
++  if (previous_published_version_ && previous_published_version_->content_version == info.content_version) {
++    OpenCandidate(*previous_published_version_, std::move(callback));
++    return;
++  }
++  background_task_runner_->PostTaskAndReplyWithResult(FROM_HERE,
++      base::BindOnce(&RulesetService::IndexAndWriteRuleset, config_, indexed_ruleset_base_dir_, info),
++      base::BindOnce(&RulesetService::CandidateIndexed, weak_ptr_factory_.GetWeakPtr(),
++          info.content_version, std::move(callback)));
++}
++void RulesetService::CandidateIndexed(std::string expected, PublishCallback callback,
++                                      const IndexedRulesetVersion& version) {
++  if (!version.IsValid() || version.content_version != expected) {
++    candidate_in_flight_ = false;
++    std::move(callback).Run({expected, false});
++    return;
++  }
++  OpenCandidate(version, std::move(callback));
++}
++void RulesetService::OpenCandidate(IndexedRulesetVersion version, PublishCallback callback) {
++  const auto path = IndexedRulesetLocator::GetRulesetDataFilePath(
++      IndexedRulesetLocator::GetSubdirectoryPathForVersion(indexed_ruleset_base_dir_, version));
++  publisher_->TryOpenAndSetRulesetFile(path, version.checksum,
++      base::BindOnce(&RulesetService::CandidateOpened, weak_ptr_factory_.GetWeakPtr(),
++          version, std::move(callback)));
++}
++void RulesetService::CandidateOpened(IndexedRulesetVersion version, PublishCallback callback,
++                                     RulesetFilePtr file) {
++  if (!file->IsValid()) {
++    candidate_in_flight_ = false;
++    std::move(callback).Run({version.content_version, false});
++    return;
++  }
++  RecordPublication(version);
++  publisher_->PublishNewRulesetVersion(std::move(file));
++  candidate_in_flight_ = false;
++  std::move(callback).Run({version.content_version, true});
++}
++void RulesetService::RecordPublication(const IndexedRulesetVersion& version) {
++  if (!published_version_ || published_version_->content_version != version.content_version) {
++    previous_published_version_ = published_version_;
++    published_version_ = version;
++  }
++  version.SaveToPrefs(local_state_);
+ }
+ 
+ void RulesetService::IndexAndStoreAndPublishRulesetIfNeeded(
+@@ -304,6 +366,22 @@
+   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
+                                                 base::BlockingType::MAY_BLOCK);
+ 
++  // Validate the bounded compiler protocol before invoking the browser-side
++  // protobuf/indexing pipeline, including when rebuilding a cached generation.
++  if (config.filter_tag == kSendaRulesetConfig.filter_tag) {
++    UnindexedRulesetStreamGenerator validation_input(unindexed_ruleset_info);
++    const auto size = validation_input.ruleset_size();
++    if (!validation_input.ruleset_stream() || size < 1024 || size > 20 * 1024 * 1024) {
++      return IndexedRulesetVersion(config.filter_tag);
++    }
++    google::protobuf::io::CodedInputStream stream(validation_input.ruleset_stream());
++    std::string bytes;
++    if (!stream.ReadString(&bytes, static_cast<int>(size)) ||
++        !ValidateSendaUnindexedRuleset(base::as_byte_span(bytes))) {
++      return IndexedRulesetVersion(config.filter_tag);
++    }
++  }
++
+   UnindexedRulesetStreamGenerator unindexed_ruleset_stream_generator(
+       unindexed_ruleset_info);
+ 
+@@ -395,7 +473,7 @@
+   UnindexedRulesetReader reader(
+       unindexed_ruleset_stream_generator->ruleset_stream());
+ 
+-  size_t num_unsupported_rules = 0;
++  size_t num_unsupported_rules = 0, accepted_url_rules = 0;
+   url_pattern_index::proto::FilteringRules ruleset_chunk;
+   while (reader.ReadNextChunk(&ruleset_chunk)) {
+     if (ruleset_chunk.has_cosmetic_exceptions()) {
+@@ -404,6 +482,8 @@
+     for (const auto& rule : ruleset_chunk.url_rules()) {
+       if (!indexer->AddUrlRule(rule)) {
+         ++num_unsupported_rules;
++      } else {
++        ++accepted_url_rules;
+       }
+     }
+     for (const auto& rule : ruleset_chunk.style_rules()) {
+@@ -418,7 +498,8 @@
+       base::StrCat({config.uma_tag, ".IndexRuleset.NumUnsupportedRules"}),
+       num_unsupported_rules);
+ 
+-  return reader.num_bytes_read() == unindexed_ruleset_size;
++  return !reader.had_error() && reader.num_bytes_read() == unindexed_ruleset_size &&
++      (config.filter_tag != kSendaRulesetConfig.filter_tag || accepted_url_rules >= 1000);
+ }
+ 
+ // static
+@@ -524,10 +605,10 @@
+   publisher_->TryOpenAndSetRulesetFile(
+       file_path, version.checksum,
+       base::BindOnce(&RulesetService::OnRulesetSet,
+-                     weak_ptr_factory_.GetWeakPtr()));
+-}
+-
+-void RulesetService::OnRulesetSet(RulesetFilePtr file) {
++                     weak_ptr_factory_.GetWeakPtr(), version));
++}
++
++void RulesetService::OnRulesetSet(IndexedRulesetVersion version, RulesetFilePtr file) {
+   // The file has just been successfully written, so a failure here is unlikely
+   // unless |indexed_ruleset_base_dir_| has been tampered with or there are disk
+   // errors. Still, restore the invariant that a valid version in preferences
+@@ -541,6 +622,7 @@
+     return;
+   }
+ 
++  RecordPublication(version);
+   publisher_->PublishNewRulesetVersion(std::move(file));
+ }
+ 
+diff --git a/components/subresource_filter/tools/rule_parser/senda_filter_official_unittest.cc b/components/subresource_filter/tools/rule_parser/senda_filter_official_unittest.cc
+--- a/components/subresource_filter/tools/rule_parser/senda_filter_official_unittest.cc
++++ b/components/subresource_filter/tools/rule_parser/senda_filter_official_unittest.cc
+@@ -8,6 +8,7 @@
+ #include "base/time/time.h"
+ #include "components/subresource_filter/core/common/indexed_ruleset.h"
+ #include "components/subresource_filter/core/common/unindexed_ruleset.h"
++#include "components/subresource_filter/core/common/senda_ruleset_validator.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+ #include "third_party/protobuf/src/google/protobuf/io/zero_copy_stream_impl_lite.h"
+ 
+@@ -30,6 +31,7 @@
+   EXPECT_GT(result.cosmetic_rules, 0u);
+   std::string encoded;
+   ASSERT_TRUE(base::ReadFileToString(output, &encoded));
++  EXPECT_TRUE(ValidateSendaUnindexedRuleset(base::as_byte_span(encoded)));
+   google::protobuf::io::ArrayInputStream input(encoded.data(), encoded.size());
+   UnindexedRulesetReader reader(&input);
+   url_pattern_index::proto::FilteringRules chunk;

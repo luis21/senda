@@ -11,6 +11,23 @@ tool = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(tool)
 
 class SnapshotVerification(unittest.TestCase):
+    def test_bundled_metadata_compiles_only_trusted_snapshot_versions_and_license(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root/'source'; source.mkdir()
+            manifest = self.fixture(source)
+            manifest['sources'] = [{'version':'202611150000'}, {'version':'202611160028'}]
+            (source/'manifest.json').write_text(json.dumps(manifest))
+            license_text = 'CC-BY-SA-3.0 "quoted" \\ path\nnext line\n'
+            (source/'LICENSE').write_text(license_text)
+            tool.sync_snapshot(source, root/'chromium')
+            header = root/'chromium/third_party/senda_filter_lists/BundledMetadata.inc'
+            self.assertTrue(header.exists(), 'Build must embed fallback metadata without runtime Python')
+            text = header.read_text()
+            self.assertIn('202611150000', text)
+            self.assertIn('202611160028', text)
+            self.assertIn(json.dumps(license_text), text)
+
     def test_schema_two_requires_embedded_exception_contract(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

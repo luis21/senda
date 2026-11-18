@@ -34,3 +34,15 @@ Se añadió un almacén secuenciado con generaciones inmutables, manifiesto vers
 - Replay de 13 parches y coincidencia con el checkout: PASS.
 
 Pendientes: coordinador de red/publicación, controles del panel, ejecución real del servicio con sandbox y validación final del navegador completo.
+
+## Tarea 4 — coordinación y conexión al navegador
+
+El coordinador descarga ambas URLs oficiales secuencialmente, usa validadores HTTP, convierte candidatos y espera confirmación de la generación publicada antes de guardar el puntero activo. Las preferencias son globales por directorio de usuario. Se añadió una configuración independiente de reglas Senda para impedir que el componente de anuncios de Google las reemplace; la protección de amenazas de Safe Browsing se conserva.
+
+- 17 pruebas del coordinador pasan con red/reloj simulados: 200/304, fuentes sin cambios, excepción como único cambio, rollback de versiones, solicitudes agrupadas, automático desactivado/manual, caché perdida/reparada, reinicio sin conexión, plazos 1/6/24 horas, cierre, certificados, redirecciones, descargas grandes, fallo de publicación y fallo del puntero con recuperación de la versión publicada anterior.
+- Casos fallidos observados y corregidos: lectura de ETag como cabecera no combinable, limpieza asíncrona con retorno ignorado, 304 sin caché, cómputo del reintento desde el fallo y copia recuperada antigua que se presentaba como vigente.
+- Cinco pruebas adicionales de artefactos validan forma, tamaños, metadatos y rechazo de CSS capaz de introducir declaraciones/importaciones. Se reprodujo y corrigió el desbordamiento de longitud uint32 del lector genérico, que antes aceptaba como vacío un mensaje inválido.
+- Última ejecución completa antes de cinco casos negativos adicionales: 35 pruebas nativas pasan, incluyendo listas completas; esos cinco nuevos casos también pasan. Se realizará una ejecución conjunta final.
+- 19 pruebas Python pasan. El bootstrap recibe versiones/licencia desde un include generado únicamente durante la preparación de la copia de respaldo; las descargas de ejecución siguen siendo datos y no generan C++ ni usan Python.
+- Los objetos de conexión de arranque, preferencias, proceso de utilidad y servicio de reglas compilaron. El cliente del proceso espera su terminación antes de validar/indexar la salida; su comprobación real con sandbox sigue pendiente de la compilación completa en tarea 6.
+- El parche 0014 se aplica sobre los trece anteriores. La comparación global con el checkout se repetirá al exportar también el panel que se está implementando.

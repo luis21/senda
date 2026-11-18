@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +42,20 @@ def sync_snapshot(directory, chromium_root):
         names.append('CosmeticExceptions.inc')
     for name in names:
         write_if_changed(target/name, (Path(directory)/name).read_bytes())
+    # Immutable fallback metadata is compiled once. Downloaded list updates
+    # never generate or execute C++; their exceptions remain in the ruleset.
+    versions = [item.get('version', '') for item in manifest['sources']]
+    if len(versions) == 2 and all(re.fullmatch(r'[0-9]{12}', v) for v in versions):
+        license_text = (Path(directory)/'LICENSE').read_text(encoding='utf-8')
+        if not license_text or '\0' in license_text or len(license_text.encode('utf-8')) > 128*1024:
+            raise ValueError('Invalid bundled license')
+        header = ('// Generated from the verified bundled snapshot; not a download artifact.\n'
+                  '#include <array>\n#include <string_view>\nnamespace subresource_filter {\n'
+                  'inline constexpr std::array<std::string_view, 2> kSendaBundledVersions = {'+
+                  ','.join(json.dumps(v) for v in versions)+'};\n'
+                  'inline constexpr std::string_view kSendaBundledLicense = '+json.dumps(license_text)+';\n'
+                  '}\n')
+        write_if_changed(target/'BundledMetadata.inc', header.encode('utf-8'))
     versions = ', '.join(item['version'] for item in manifest['sources'])
     readme = (
         'Name: EasyList and EasyPrivacy\nShort Name: senda_filter_lists\nURL: https://easylist.to/\n'
