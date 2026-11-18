@@ -66,10 +66,10 @@ Las rutas siguientes que empiezan por `components/`, `chrome/` o `third_party/bl
 
 **Interfaces:** `SendaFilterStore(base::FilePath root)` funciona en una secuencia de bloqueo. `RecoveryResult Recover()` devuelve candidato activo/anterior validado o necesidad de fallback incluido. `StageResult Stage(GenerationManifest manifest, base::FilePath staging_dir)` verifica hashes, tamaños, versiones/formato y mueve el candidato a un directorio inmutable propio. `bool CommitActive(std::string generation_id)` sustituye atómicamente el puntero conservando el anterior. `void Prune()` solo elimina generaciones no seleccionadas que no estén en uso; los fallos de borrado son aplazables. IDs son hashes hexadecimales generados localmente; nunca rutas recibidas de la red.
 
-- [ ] Añadir `senda_filter_store_unittest.cc` con directorios temporales: activo válido, activo corrupto/anterior válido, ambos inválidos/fallback, archivo faltante, metadatos incompatibles, hash alterado, escritura fallida del puntero y cierre simulado en cada etapa. Añadir caso de archivo abierto/mapeado y nombre de generación malicioso.
-- [ ] Ejecutar las pruebas para comprobar fallo inicial.
-- [ ] Implementar almacén en `UserDataDir/SendaFilterLists`, manifiesto con dos fuentes (versión/hash/ETag/Last-Modified), reglas, licencia y versión del compilador. Identificación incluye todos los datos semánticos; no ETag ni fechas de comprobación. Sincronizar escrituras necesarias antes de reemplazar el puntero. Aceptar solo rutas descendientes propias; no limpiar fuera de la raíz ni borrar activo/anterior.
-- [ ] Ejecutar pruebas con inyección de errores de disco y reinicios simulados. Asegurar que fallo en `CommitActive` no impide recuperar una generación previamente válida. Exportar `patches/0013-senda-filter-store.patch` y guardar commit.
+- [x] Añadir `senda_filter_store_unittest.cc` con directorios temporales: activo válido, activo corrupto/anterior válido, ambos inválidos/fallback, archivo faltante, metadatos incompatibles, hash alterado, escritura fallida del puntero y cierre simulado en cada etapa. Añadir caso de archivo abierto/mapeado y nombre de generación malicioso.
+- [x] Ejecutar las pruebas para comprobar fallo inicial.
+- [x] Implementar almacén en `UserDataDir/SendaFilterLists`, manifiesto con dos fuentes (versión/hash/ETag/Last-Modified), reglas, licencia y versión del compilador. Identificación incluye todos los datos semánticos; no ETag ni fechas de comprobación. Sincronizar escrituras necesarias antes de reemplazar el puntero. Aceptar solo rutas descendientes propias; no limpiar fuera de la raíz ni borrar activo/anterior.
+- [x] Ejecutar pruebas con inyección de errores de disco y reinicios simulados. Asegurar que fallo en `CommitActive` no impide recuperar una generación previamente válida. Exportar `patches/0013-senda-filter-store.patch` y guardar commit.
 
 ### Task 4: Descarga, publicación y programación global
 

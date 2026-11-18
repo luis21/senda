@@ -1,0 +1,539 @@
+diff --git a/chrome/browser/subresource_filter/BUILD.gn b/chrome/browser/subresource_filter/BUILD.gn
+--- a/chrome/browser/subresource_filter/BUILD.gn
++++ b/chrome/browser/subresource_filter/BUILD.gn
+@@ -230,15 +230,27 @@
+     "//components/subresource_filter/core/common/senda_generation_unittest.cc",
+     "//components/subresource_filter/tools/rule_parser/senda_filter_compiler_unittest.cc",
+     "//components/subresource_filter/tools/rule_parser/senda_filter_official_unittest.cc",
++    "senda_filter_store_unittest.cc",
+     "senda_filter_updates_test_main.cc",
+   ]
+   deps = [
++    ":senda_filter_store",
+     "//base",
+     "//components/subresource_filter/core/common",
+     "//components/subresource_filter/tools/rule_parser:senda_filter_compiler",
+     "//components/url_pattern_index/proto:url_pattern_index",
++    "//crypto",
+     "//testing/gtest",
+     "//third_party/protobuf:protobuf_lite",
+     "//url",
+   ]
+ }
++
++source_set("senda_filter_store") {
++  sources = [
++    "senda_filter_store.cc",
++    "senda_filter_store.h",
++  ]
++  public_deps = [ "//base" ]
++  deps = [ "//crypto" ]
++}
+diff --git a/chrome/browser/subresource_filter/senda_filter_store.h b/chrome/browser/subresource_filter/senda_filter_store.h
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/subresource_filter/senda_filter_store.h
+@@ -0,0 +1,58 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#ifndef CHROME_BROWSER_SUBRESOURCE_FILTER_SENDA_FILTER_STORE_H_
++#define CHROME_BROWSER_SUBRESOURCE_FILTER_SENDA_FILTER_STORE_H_
++#include <array>
++#include <optional>
++#include <string>
++#include <vector>
++#include "base/files/file_path.h"
++#include "base/functional/callback.h"
++
++namespace subresource_filter {
++struct FilterSourceInfo {
++  std::string version;
++  std::string sha256;
++  std::string etag;
++  std::string last_modified;
++};
++struct GenerationManifest {
++  std::string id;
++  std::string ruleset_sha256;
++  std::string license_sha256;
++  uint32_t ruleset_bytes = 0;
++  std::array<FilterSourceInfo, 2> sources;
++  // Derived by the store, never accepted from serialized metadata.
++  base::FilePath directory;
++};
++struct StageResult {
++  std::optional<GenerationManifest> generation;
++};
++struct RecoveryResult {
++  // Ordered active then previous; empty means use the bundled fallback.
++  std::vector<GenerationManifest> generations;
++};
++
++// All operations, including destruction, run on the caller's blocking sequence.
++class SendaFilterStore {
++ public:
++  using AtomicWriter = base::RepeatingCallback<bool(const base::FilePath&, std::string_view)>;
++  explicit SendaFilterStore(base::FilePath root, AtomicWriter writer = {});
++  ~SendaFilterStore();
++  SendaFilterStore(const SendaFilterStore&) = delete;
++  SendaFilterStore& operator=(const SendaFilterStore&) = delete;
++  base::FilePath CreateStagingDirectory();
++  StageResult Stage(GenerationManifest manifest, const base::FilePath& staging_dir);
++  bool CommitActive(std::string generation_id);
++  RecoveryResult Recover();
++  bool DiscardStaging(const base::FilePath& staging_dir);
++  void Prune();
++ private:
++  bool OwnedDirectory(const base::FilePath& path) const;
++  bool ValidateFiles(const base::FilePath& directory, const GenerationManifest& manifest) const;
++  std::optional<GenerationManifest> ReadGeneration(const std::string& id) const;
++  const base::FilePath root_;
++  AtomicWriter writer_;
++};
++}  // namespace subresource_filter
++#endif
+diff --git a/chrome/browser/subresource_filter/senda_filter_store.cc b/chrome/browser/subresource_filter/senda_filter_store.cc
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/subresource_filter/senda_filter_store.cc
+@@ -0,0 +1,276 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#include "chrome/browser/subresource_filter/senda_filter_store.h"
++#include <algorithm>
++#include <set>
++#include <utility>
++#include "base/files/file_enumerator.h"
++#include "base/files/file_util.h"
++#include "base/files/important_file_writer.h"
++#include "base/functional/bind.h"
++#include "base/json/json_reader.h"
++#include "base/json/json_writer.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_util.h"
++#include "base/time/time.h"
++#include "base/values.h"
++#include "crypto/hash.h"
++
++namespace subresource_filter {
++namespace {
++constexpr size_t kSourceLimit = 20 * 1024 * 1024;
++constexpr size_t kJsonLimit = 64 * 1024;
++constexpr size_t kLicenseLimit = 128 * 1024;
++constexpr char kCompiler[] = "senda-filter-compiler-1";
++constexpr std::array<const char*, 2> kSourceFiles = {"easylist.txt", "easyprivacy.txt"};
++
++bool Id(std::string_view id) {
++  return id.size() == 64 && std::ranges::all_of(id, [](char c) {
++    return base::IsAsciiDigit(c) || (c >= 'a' && c <= 'f');
++  });
++}
++bool Version(std::string_view version) {
++  return version.size() == 12 && std::ranges::all_of(version, base::IsAsciiDigit<char>);
++}
++bool Validator(std::string_view value) {
++  return value.size() <= 8192 && base::IsStringUTF8(value) &&
++      std::ranges::none_of(value, [](unsigned char c) { return c < 32 || c == 127; });
++}
++std::string Hash(std::string_view data) {
++  return base::HexEncodeLower(crypto::hash::Sha256(data));
++}
++std::string ContentId(const GenerationManifest& manifest) {
++  return Hash(std::string(kCompiler) + "\n" + manifest.ruleset_sha256 + "\n" +
++      manifest.license_sha256 + "\n" + manifest.sources[0].sha256 + "\n" +
++      manifest.sources[1].sha256 + "\n" + manifest.sources[0].version + "\n" +
++      manifest.sources[1].version);
++}
++std::optional<base::DictValue> ReadJson(const base::FilePath& path) {
++  std::string text;
++  if (!base::ReadFileToStringWithMaxSize(path, &text, kJsonLimit)) { return std::nullopt; }
++  return base::JSONReader::ReadDict(text, base::JSON_PARSE_RFC, 8);
++}
++base::DictValue Serialize(const GenerationManifest& manifest) {
++  base::DictValue value;
++  value.Set("schema", 1);
++  value.Set("compiler", kCompiler);
++  value.Set("id", manifest.id);
++  value.Set("ruleset_sha256", manifest.ruleset_sha256);
++  value.Set("ruleset_bytes", static_cast<int>(manifest.ruleset_bytes));
++  value.Set("license_sha256", manifest.license_sha256);
++  base::ListValue sources;
++  for (const auto& source : manifest.sources) {
++    base::DictValue item;
++    item.Set("version", source.version);
++    item.Set("sha256", source.sha256);
++    item.Set("etag", source.etag);
++    item.Set("last_modified", source.last_modified);
++    sources.Append(std::move(item));
++  }
++  value.Set("sources", std::move(sources));
++  return value;
++}
++bool MetadataValid(const GenerationManifest& manifest) {
++  if (!Id(manifest.ruleset_sha256) || !Id(manifest.license_sha256) ||
++      manifest.ruleset_bytes < 1024 || manifest.ruleset_bytes > kSourceLimit) {
++    return false;
++  }
++  for (const auto& source : manifest.sources) {
++    if (!Version(source.version) || !Id(source.sha256) ||
++        !Validator(source.etag) || !Validator(source.last_modified)) { return false; }
++  }
++  return true;
++}
++std::optional<GenerationManifest> Deserialize(const base::DictValue& value) {
++  const auto* compiler = value.FindString("compiler");
++  const auto* id = value.FindString("id");
++  const auto* rules_hash = value.FindString("ruleset_sha256");
++  const auto* license_hash = value.FindString("license_sha256");
++  auto bytes = value.FindInt("ruleset_bytes");
++  const auto* sources = value.FindList("sources");
++  if (value.FindInt("schema") != 1 || !compiler || *compiler != kCompiler ||
++      !id || !Id(*id) || !rules_hash || !license_hash || !bytes || *bytes < 0 ||
++      !sources || sources->size() != 2) { return std::nullopt; }
++  GenerationManifest manifest;
++  manifest.id = *id;
++  manifest.ruleset_sha256 = *rules_hash;
++  manifest.license_sha256 = *license_hash;
++  manifest.ruleset_bytes = *bytes;
++  for (size_t i = 0; i < 2; ++i) {
++    const auto* item = (*sources)[i].GetIfDict();
++    if (!item) { return std::nullopt; }
++    const auto* version = item->FindString("version");
++    const auto* hash = item->FindString("sha256");
++    const auto* etag = item->FindString("etag");
++    const auto* modified = item->FindString("last_modified");
++    if (!version || !hash || !etag || !modified) { return std::nullopt; }
++    manifest.sources[i] = {*version, *hash, *etag, *modified};
++  }
++  if (!MetadataValid(manifest) || manifest.id != ContentId(manifest)) { return std::nullopt; }
++  return manifest;
++}
++std::vector<std::string> PointerIds(const base::DictValue& pointer) {
++  std::vector<std::string> ids;
++  if (pointer.FindInt("schema") != 1) { return ids; }
++  for (auto key : {"active", "previous"}) {
++    const auto* id = pointer.FindString(key);
++    if (id && Id(*id) && std::ranges::find(ids, *id) == ids.end()) { ids.push_back(*id); }
++  }
++  return ids;
++}
++}  // namespace
++
++SendaFilterStore::SendaFilterStore(base::FilePath root, AtomicWriter writer)
++    : root_(std::move(root)), writer_(std::move(writer)) {
++  if (writer_.is_null()) {
++    writer_ = base::BindRepeating([](const base::FilePath& path, std::string_view data) {
++      return base::ImportantFileWriter::WriteFileAtomically(path, data, "SendaFilters");
++    });
++  }
++}
++SendaFilterStore::~SendaFilterStore() = default;
++
++bool SendaFilterStore::OwnedDirectory(const base::FilePath& path) const {
++  base::FilePath real_root, real_path;
++  return path.DirName() == root_ && base::NormalizeFilePath(root_, &real_root) &&
++      base::NormalizeFilePath(path, &real_path) && real_path.DirName() == real_root;
++}
++base::FilePath SendaFilterStore::CreateStagingDirectory() {
++  base::FilePath staging;
++  if (!base::CreateDirectory(root_) ||
++      !base::CreateTemporaryDirInDir(root_, FILE_PATH_LITERAL("staging-"), &staging) ||
++      !OwnedDirectory(staging)) { return {}; }
++  return staging;
++}
++bool SendaFilterStore::ValidateFiles(const base::FilePath& directory,
++                                    const GenerationManifest& manifest) const {
++  if (!MetadataValid(manifest) || !OwnedDirectory(directory)) { return false; }
++  std::string text;
++  if (!base::ReadFileToStringWithMaxSize(directory.AppendASCII("UnindexedRules"), &text, kSourceLimit) ||
++      text.size() != manifest.ruleset_bytes || Hash(text) != manifest.ruleset_sha256) { return false; }
++  if (!base::ReadFileToStringWithMaxSize(directory.AppendASCII("LICENSE"), &text, kLicenseLimit) ||
++      text.empty() || Hash(text) != manifest.license_sha256) { return false; }
++  for (size_t i = 0; i < 2; ++i) {
++    if (!base::ReadFileToStringWithMaxSize(directory.AppendASCII(kSourceFiles[i]), &text, kSourceLimit) ||
++        text.size() < 1024 || Hash(text) != manifest.sources[i].sha256 || !base::IsStringUTF8(text)) { return false; }
++    std::string_view view = text;
++    if (view.starts_with("\xef\xbb\xbf")) { view.remove_prefix(3); }
++    if (!view.starts_with("[Adblock Plus ")) { return false; }
++    bool version_found = false;
++    size_t count = 0;
++    while (!view.empty() && ++count <= 20) {
++      const auto end = view.find('\n');
++      auto line = view.substr(0, end);
++      if (line.ends_with('\r')) { line.remove_suffix(1); }
++      if (line.starts_with("! Version: ")) {
++        if (version_found || line.substr(11) != manifest.sources[i].version) { return false; }
++        version_found = true;
++      }
++      if (end == std::string_view::npos) { break; }
++      view.remove_prefix(end + 1);
++    }
++    if (!version_found) { return false; }
++  }
++  return true;
++}
++std::optional<GenerationManifest> SendaFilterStore::ReadGeneration(const std::string& id) const {
++  if (!Id(id)) { return std::nullopt; }
++  const auto directory = root_.AppendASCII(id);
++  if (!OwnedDirectory(directory)) { return std::nullopt; }
++  auto json = ReadJson(directory.AppendASCII("manifest.json"));
++  auto manifest = json ? Deserialize(*json) : std::nullopt;
++  if (!manifest || manifest->id != id || !ValidateFiles(directory, *manifest)) { return std::nullopt; }
++  manifest->directory = directory;
++  return manifest;
++}
++StageResult SendaFilterStore::Stage(GenerationManifest manifest, const base::FilePath& staging_dir) {
++  if (!OwnedDirectory(staging_dir) || !staging_dir.BaseName().MaybeAsASCII().starts_with("staging-") ||
++      !ValidateFiles(staging_dir, manifest)) { return {}; }
++  const auto id = ContentId(manifest);
++  if (!manifest.id.empty() && manifest.id != id) { return {}; }
++  manifest.id = id;
++  const auto json = base::WriteJson(Serialize(manifest));
++  if (!json || !writer_.Run(staging_dir.AppendASCII("manifest.json"), *json)) { return {}; }
++  const auto destination = root_.AppendASCII(id);
++  if (base::PathExists(destination)) {
++    if (auto existing = ReadGeneration(id)) {
++      DiscardStaging(staging_dir);
++      return {std::move(existing)};
++    }
++    // A corrupt generation with the same ID can be rehydrated. Keep its old
++    // directory under our staging namespace until the replacement succeeds.
++    auto corrupt = CreateStagingDirectory();
++    if (corrupt.empty() || !base::DeleteFile(corrupt) ||
++        !base::Move(destination, corrupt)) { return {}; }
++    if (!base::Move(staging_dir, destination)) {
++      base::Move(corrupt, destination);
++      return {};
++    }
++    DiscardStaging(corrupt);
++  } else if (!base::Move(staging_dir, destination)) { return {}; }
++  manifest.directory = destination;
++  return {std::move(manifest)};
++}
++bool SendaFilterStore::CommitActive(std::string generation_id) {
++  if (!ReadGeneration(generation_id)) { return false; }
++  auto recovered = Recover();
++  base::DictValue pointer;
++  pointer.Set("schema", 1);
++  pointer.Set("active", generation_id);
++  for (const auto& generation : recovered.generations) {
++    if (generation.id != generation_id) {
++      pointer.Set("previous", generation.id);
++      break;
++    }
++  }
++  const auto text = base::WriteJson(pointer);
++  return text && writer_.Run(root_.AppendASCII("active.json"), *text);
++}
++RecoveryResult SendaFilterStore::Recover() {
++  RecoveryResult result;
++  const auto pointer = ReadJson(root_.AppendASCII("active.json"));
++  const auto ids = pointer ? PointerIds(*pointer) : std::vector<std::string>();
++  if (!ids.empty()) {
++    for (const auto& id : ids) {
++      if (auto generation = ReadGeneration(id)) { result.generations.push_back(std::move(*generation)); }
++    }
++    return result;
++  }
++  // A torn/missing pointer can be reconstructed from independently verified
++  // immutable manifests. Limit scanning work and never trust directory mtimes.
++  base::FileEnumerator entries(root_, false, base::FileEnumerator::DIRECTORIES);
++  size_t scanned = 0;
++  for (auto directory = entries.Next(); !directory.empty() && scanned < 8; directory = entries.Next()) {
++    const auto id = directory.BaseName().MaybeAsASCII();
++    if (!Id(id)) { continue; }
++    ++scanned;
++    if (auto generation = ReadGeneration(id)) { result.generations.push_back(std::move(*generation)); }
++  }
++  std::ranges::sort(result.generations, [](const auto& a, const auto& b) {
++    return std::pair(a.sources[0].version, a.sources[1].version) >
++           std::pair(b.sources[0].version, b.sources[1].version);
++  });
++  return result;
++}
++bool SendaFilterStore::DiscardStaging(const base::FilePath& staging_dir) {
++  return OwnedDirectory(staging_dir) &&
++      staging_dir.BaseName().MaybeAsASCII().starts_with("staging-") &&
++      base::DeletePathRecursively(staging_dir);
++}
++void SendaFilterStore::Prune() {
++  const auto pointer = ReadJson(root_.AppendASCII("active.json"));
++  const auto ids = pointer ? PointerIds(*pointer) : std::vector<std::string>();
++  base::FileEnumerator entries(root_, false, base::FileEnumerator::DIRECTORIES);
++  for (auto directory = entries.Next(); !directory.empty(); directory = entries.Next()) {
++    const auto name = directory.BaseName().MaybeAsASCII();
++    if (!OwnedDirectory(directory)) { continue; }
++    if (Id(name) && !ids.empty() && std::ranges::find(ids, name) == ids.end()) {
++      // A Windows mapping may prevent deletion. Failure is safe and retried.
++      base::DeletePathRecursively(directory);
++    } else if (name.starts_with("staging-") &&
++               base::Time::Now() - entries.GetInfo().GetLastModifiedTime() > base::Days(1)) {
++      DiscardStaging(directory);
++    }
++  }
++}
++}  // namespace subresource_filter
+diff --git a/chrome/browser/subresource_filter/senda_filter_store_unittest.cc b/chrome/browser/subresource_filter/senda_filter_store_unittest.cc
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/subresource_filter/senda_filter_store_unittest.cc
+@@ -0,0 +1,159 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#include "chrome/browser/subresource_filter/senda_filter_store.h"
++#include "base/files/file_util.h"
++#include "base/files/important_file_writer.h"
++#include "base/files/scoped_temp_dir.h"
++#include "base/functional/bind.h"
++#include "base/strings/string_number_conversions.h"
++#include "crypto/hash.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace subresource_filter {
++namespace {
++std::string Hash(std::string_view bytes) {
++  return base::HexEncodeLower(crypto::hash::Sha256(bytes));
++}
++class SendaFilterStoreTest : public testing::Test {
++ protected:
++  void SetUp() override { ASSERT_TRUE(dir_.CreateUniqueTempDir()); }
++  StageResult Stage(SendaFilterStore& store, std::string version = "202611170028") {
++    auto staging = store.CreateStagingDirectory();
++    GenerationManifest manifest;
++    for (size_t i = 0; i < 2; ++i) {
++      const auto* title = i == 0 ? "EasyList" : "EasyPrivacy";
++      auto data = std::string("[Adblock Plus 2.0]\n! Title: ") + title +
++                  "\n! Version: " + version + "\n" + std::string(1024, 'a');
++      EXPECT_TRUE(base::WriteFile(staging.AppendASCII(i ? "easyprivacy.txt" : "easylist.txt"), data));
++      manifest.sources[i].version = version;
++      manifest.sources[i].sha256 = Hash(data);
++    }
++    const std::string binary = "rules-" + version + std::string(1024, 'b');
++    EXPECT_TRUE(base::WriteFile(staging.AppendASCII("UnindexedRules"), binary));
++    EXPECT_TRUE(base::WriteFile(staging.AppendASCII("LICENSE"), "EasyList authors CC-BY-SA-3.0"));
++    manifest.ruleset_sha256 = Hash(binary);
++    manifest.ruleset_bytes = binary.size();
++    manifest.license_sha256 = Hash("EasyList authors CC-BY-SA-3.0");
++    return store.Stage(std::move(manifest), staging);
++  }
++  base::ScopedTempDir dir_;
++};
++
++TEST_F(SendaFilterStoreTest, RecoversPreviousWhenActiveIsCorrupt) {
++  SendaFilterStore store(dir_.GetPath());
++  auto first = Stage(store);
++  ASSERT_TRUE(first.generation);
++  ASSERT_TRUE(store.CommitActive(first.generation->id));
++  auto second = Stage(store, "202611170029");
++  ASSERT_TRUE(second.generation);
++  ASSERT_TRUE(store.CommitActive(second.generation->id));
++  ASSERT_TRUE(base::WriteFile(second.generation->directory.AppendASCII("UnindexedRules"),
++                            std::string(second.generation->ruleset_bytes, 'x')));
++  auto recovered = store.Recover();
++  ASSERT_EQ(1u, recovered.generations.size());
++  EXPECT_EQ(first.generation->id, recovered.generations[0].id);
++  const auto source_path = first.generation->directory.AppendASCII("easylist.txt");
++  std::string source;
++  ASSERT_TRUE(base::ReadFileToString(source_path, &source));
++  source.back() = 'c';
++  ASSERT_TRUE(base::WriteFile(source_path, source));
++  EXPECT_TRUE(store.Recover().generations.empty());
++}
++
++TEST_F(SendaFilterStoreTest, InterruptedStageAndFailedPointerKeepActive) {
++  bool fail_writes = false;
++  SendaFilterStore store(dir_.GetPath(), base::BindRepeating(
++      [](bool* fail, const base::FilePath& path, std::string_view data) {
++        return !*fail && base::ImportantFileWriter::WriteFileAtomically(path, data);
++      }, &fail_writes));
++  auto first = Stage(store);
++  ASSERT_TRUE(first.generation);
++  ASSERT_TRUE(store.CommitActive(first.generation->id));
++  auto second = Stage(store, "202611170029");
++  ASSERT_TRUE(second.generation);
++  fail_writes = true;
++  EXPECT_FALSE(store.CommitActive(second.generation->id));
++  auto recovered = store.Recover();
++  ASSERT_FALSE(recovered.generations.empty());
++  EXPECT_EQ(first.generation->id, recovered.generations[0].id);
++}
++
++TEST_F(SendaFilterStoreTest, RejectsPathsOutsideOwnedRootAndUntrustedIds) {
++  auto root = dir_.GetPath().AppendASCII("owned");
++  auto outside = dir_.GetPath().AppendASCII("outside");
++  ASSERT_TRUE(base::CreateDirectory(outside));
++  ASSERT_TRUE(base::WriteFile(outside.AppendASCII("sentinel"), "keep"));
++  SendaFilterStore store(root);
++  EXPECT_FALSE(store.Stage(GenerationManifest(), outside).generation);
++  EXPECT_FALSE(store.CommitActive("../outside"));
++  EXPECT_FALSE(store.DiscardStaging(outside));
++  store.Prune();
++  EXPECT_TRUE(base::PathExists(outside.AppendASCII("sentinel")));
++}
++
++TEST_F(SendaFilterStoreTest, CorruptPointerAndUnsupportedManifestRecoverSafely) {
++  SendaFilterStore store(dir_.GetPath());
++  auto first = Stage(store);
++  ASSERT_TRUE(first.generation);
++  ASSERT_TRUE(store.CommitActive(first.generation->id));
++  ASSERT_TRUE(base::WriteFile(dir_.GetPath().AppendASCII("active.json"), "{partial"));
++  ASSERT_EQ(1u, store.Recover().generations.size());
++  const auto manifest_path = first.generation->directory.AppendASCII("manifest.json");
++  std::string metadata;
++  ASSERT_TRUE(base::ReadFileToString(manifest_path, &metadata));
++  const auto position = metadata.find("\"schema\":1");
++  ASSERT_NE(std::string::npos, position);
++  metadata.replace(position, 10, "\"schema\":99");
++  ASSERT_TRUE(base::WriteFile(manifest_path, metadata));
++  EXPECT_TRUE(store.Recover().generations.empty());
++}
++
++TEST_F(SendaFilterStoreTest, CanRehydrateSameContentAfterCorruption) {
++  SendaFilterStore store(dir_.GetPath());
++  auto first = Stage(store);
++  ASSERT_TRUE(first.generation);
++  ASSERT_TRUE(store.CommitActive(first.generation->id));
++  ASSERT_TRUE(base::WriteFile(first.generation->directory.AppendASCII("UnindexedRules"), "broken"));
++  auto repaired = Stage(store);
++  ASSERT_TRUE(repaired.generation);
++  EXPECT_EQ(first.generation->id, repaired.generation->id);
++  ASSERT_FALSE(store.Recover().generations.empty());
++}
++
++TEST_F(SendaFilterStoreTest, PruneProtectsActivePreviousAndAnOpenWindowsFile) {
++  SendaFilterStore store(dir_.GetPath());
++  auto first = Stage(store);
++  ASSERT_TRUE(first.generation);
++  ASSERT_TRUE(store.CommitActive(first.generation->id));
++  auto second = Stage(store, "202611170029");
++  ASSERT_TRUE(second.generation);
++  ASSERT_TRUE(store.CommitActive(second.generation->id));
++  auto third = Stage(store, "202611170030");
++  ASSERT_TRUE(third.generation);
++  ASSERT_TRUE(store.CommitActive(third.generation->id));
++  auto old_rules = first.generation->directory.AppendASCII("UnindexedRules");
++  base::File open(old_rules, base::File::FLAG_OPEN | base::File::FLAG_READ);
++  ASSERT_TRUE(open.IsValid());
++  store.Prune();
++  EXPECT_TRUE(base::PathExists(old_rules));
++  EXPECT_EQ(2u, store.Recover().generations.size());
++  open.Close();
++  store.Prune();
++  EXPECT_FALSE(base::PathExists(first.generation->directory));
++}
++
++TEST_F(SendaFilterStoreTest, RejectsHeaderInjectionInConditionalHttpMetadata) {
++  SendaFilterStore store(dir_.GetPath());
++  auto first = Stage(store);
++  ASSERT_TRUE(first.generation);
++  const auto staging = store.CreateStagingDirectory();
++  for (const auto* file : {"easylist.txt", "easyprivacy.txt", "UnindexedRules", "LICENSE"}) {
++    ASSERT_TRUE(base::CopyFile(first.generation->directory.AppendASCII(file), staging.AppendASCII(file)));
++  }
++  auto manifest = *first.generation;
++  manifest.sources[0].etag = "legitimate\r\nInjected: value";
++  EXPECT_FALSE(store.Stage(manifest, staging).generation);
++  EXPECT_TRUE(store.DiscardStaging(staging));
++}
++}  // namespace
++}  // namespace subresource_filter

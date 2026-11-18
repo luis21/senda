@@ -23,3 +23,14 @@ Se implementó un conversor que recibe handles de dos fuentes y un archivo de sa
 - Se reprodujo y corrigió una omisión de 224 selectores con punto y coma dentro de atributos entre comillas; su prueba falló antes de corregir el analizador.
 - Se compilaron el servicio Mojo, sus tipos generados y su registro en utilidad. La prueba de aislamiento, desconexión y vida del proceso real queda para la integración con el cliente del navegador; todavía no se declara verificada en ejecución.
 - Replay de 12 parches y comparación con el checkout: PASS.
+
+## Tarea 3 — almacén y recuperación
+
+Se añadió un almacén secuenciado con generaciones inmutables, manifiesto versionado, comprobación SHA-256 de las dos fuentes, reglas y licencia, y puntero activo/anterior escrito de forma atómica. La limpieza valida rutas y aplaza archivos cuyo borrado Windows rechaza.
+
+- Siete pruebas de almacén pasan: recuperación anterior al corromper la activa, corrupción de fuentes, escritura fallida del puntero, preparación interrumpida, rechazo de rutas externas/IDs maliciosos, reconstrucción de puntero corrupto, formato incompatible, reparación del mismo contenido, conservación de activo/anterior y archivo abierto, y metadatos HTTP con controles de cabecera.
+- Las corrupciones de reglas y fuente conservan el tamaño original para comprobar el hash, no solo el tamaño. La prueba de formato cambia únicamente el número de esquema.
+- Las 17 pruebas nativas locales pasan juntas; la prueba adicional con listas completas ya pasó en tarea 2 y el conversor no cambió desde entonces.
+- Replay de 13 parches y coincidencia con el checkout: PASS.
+
+Pendientes: coordinador de red/publicación, controles del panel, ejecución real del servicio con sandbox y validación final del navegador completo.
