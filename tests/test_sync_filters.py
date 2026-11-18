@@ -11,6 +11,20 @@ tool = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(tool)
 
 class SnapshotVerification(unittest.TestCase):
+    def test_schema_two_requires_embedded_exception_contract(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.fixture(root)
+            manifest.update(schema=2, cosmetic_exceptions={'storage': 'ruleset-proto-field-3'})
+            (root/'manifest.json').write_text(json.dumps(manifest))
+            self.assertEqual(tool.verify_snapshot(root)['schema'], 2)
+            tool.sync_snapshot(root, root/'chromium')
+            self.assertFalse((root/'chromium/third_party/senda_filter_lists/CosmeticExceptions.inc').exists())
+            manifest['cosmetic_exceptions']['storage'] = 'unknown'
+            (root/'manifest.json').write_text(json.dumps(manifest))
+            with self.assertRaises(ValueError):
+                tool.verify_snapshot(root)
+
     def test_unchanged_snapshot_preserves_timestamps_but_changes_are_copied(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -14,7 +14,7 @@ def verify_snapshot(directory):
     directory = Path(directory)
     manifest = json.loads((directory/'manifest.json').read_text(encoding='utf-8'))
     data = (directory/'UnindexedRules').read_bytes()
-    if manifest.get('schema') != 1 or manifest.get('format') != 'chromium-unindexed-ruleset':
+    if manifest.get('schema') not in (1, 2) or manifest.get('format') != 'chromium-unindexed-ruleset':
         raise ValueError('Unsupported snapshot schema')
     if not 1024 <= len(data) <= 20*1024*1024 or manifest.get('bytes') != len(data):
         raise ValueError('Snapshot size mismatch')
@@ -22,7 +22,10 @@ def verify_snapshot(directory):
         raise ValueError('Snapshot checksum mismatch')
     if manifest.get('license') != 'CC-BY-SA-3.0' or not (directory/'LICENSE').is_file():
         raise ValueError('Missing snapshot license')
-    if 'cosmetic_exceptions' in manifest:
+    if manifest['schema'] == 2:
+        if manifest.get('cosmetic_exceptions', {}).get('storage') != 'ruleset-proto-field-3':
+            raise ValueError('Missing embedded cosmetic exception contract')
+    elif 'cosmetic_exceptions' in manifest:
         metadata = manifest['cosmetic_exceptions']
         header = (directory/'CosmeticExceptions.inc').read_bytes()
         if not 0 < len(header) <= 1024*1024 or metadata.get('bytes') != len(header) or metadata.get('sha256') != hashlib.sha256(header).hexdigest():
@@ -34,7 +37,7 @@ def sync_snapshot(directory, chromium_root):
     target = Path(chromium_root)/'third_party/senda_filter_lists'
     target.mkdir(parents=True, exist_ok=True)
     names = ['UnindexedRules', 'LICENSE', 'manifest.json']
-    if 'cosmetic_exceptions' in manifest:
+    if manifest['schema'] == 1 and 'cosmetic_exceptions' in manifest:
         names.append('CosmeticExceptions.inc')
     for name in names:
         write_if_changed(target/name, (Path(directory)/name).read_bytes())

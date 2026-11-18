@@ -7,6 +7,14 @@ tool = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(tool)
 
 class SourceValidation(unittest.TestCase):
+    def test_embedded_exceptions_use_filtering_rules_proto_field(self):
+        encode = getattr(tool, 'encode_cosmetic_exception_chunk', None)
+        self.assertTrue(callable(encode), 'Snapshot must embed typed exceptions')
+        exceptions = tool.prepare_cosmetic_exceptions(['@@||keep.test^$generichide'])
+        self.assertEqual(encode(exceptions), b'\x0d\x1a\x0b\x0a\x09keep.test')
+        changed = dict(exceptions, disable_all_cosmetic=True)
+        self.assertNotEqual(encode(exceptions), encode(changed))
+
     def test_activation_exceptions_are_conservatively_preserved(self):
         result = tool.prepare_cosmetic_exceptions(['@@||keep.test/path$generichide\n@@||all.test^$elemhide\n@@||other.test^$script\n'])
         self.assertEqual(result['generic_domains'], ['keep.test'])

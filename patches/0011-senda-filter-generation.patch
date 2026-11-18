@@ -1,0 +1,597 @@
+diff --git a/chrome/browser/subresource_filter/BUILD.gn b/chrome/browser/subresource_filter/BUILD.gn
+--- a/chrome/browser/subresource_filter/BUILD.gn
++++ b/chrome/browser/subresource_filter/BUILD.gn
+@@ -220,3 +220,19 @@
+     deps += [ "//third_party/fuzztest" ]
+   }
+ }
++
++import("//testing/test.gni")
++test("senda_filter_updates_unittests") {
++  sources = [
++    "senda_filter_updates_test_main.cc",
++    "//components/subresource_filter/core/common/senda_generation_unittest.cc",
++  ]
++  deps = [
++    "//base",
++    "//components/subresource_filter/core/common",
++    "//components/url_pattern_index/proto:url_pattern_index",
++    "//testing/gtest",
++    "//third_party/protobuf:protobuf_lite",
++    "//url",
++  ]
++}
+diff --git a/chrome/browser/subresource_filter/senda_filter_updates_test_main.cc b/chrome/browser/subresource_filter/senda_filter_updates_test_main.cc
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/subresource_filter/senda_filter_updates_test_main.cc
+@@ -0,0 +1,11 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#include "base/at_exit.h"
++#include "base/command_line.h"
++#include "testing/gtest/include/gtest/gtest.h"
++int main(int argc, char** argv) {
++  base::AtExitManager at_exit;
++  base::CommandLine::Init(argc, argv);
++  testing::InitGoogleTest(&argc, argv);
++  return RUN_ALL_TESTS();
++}
+diff --git a/components/url_pattern_index/proto/rules.proto b/components/url_pattern_index/proto/rules.proto
+--- a/components/url_pattern_index/proto/rules.proto
++++ b/components/url_pattern_index/proto/rules.proto
+@@ -202,7 +202,20 @@
+ }
+ 
+ // A container for lists of non-comment rules collated by RuleType.
++// Senda activation exceptions travel with URL and CSS rules, never separately.
++message CosmeticExceptions {
++  repeated string generic_domains = 1;
++  repeated string all_domains = 2;
++  repeated string generic_prefixes = 3;
++  repeated string all_prefixes = 4;
++  repeated string generic_url_substrings = 5;
++  repeated string all_url_substrings = 6;
++  optional bool disable_all_generic = 7;
++  optional bool disable_all_cosmetic = 8;
++}
++
+ message FilteringRules {
+   repeated UrlRule url_rules = 1;
+   repeated StyleRule style_rules = 2;
+-}
++  optional CosmeticExceptions cosmetic_exceptions = 3;
++}
+diff --git a/components/subresource_filter/core/common/BUILD.gn b/components/subresource_filter/core/common/BUILD.gn
+--- a/components/subresource_filter/core/common/BUILD.gn
++++ b/components/subresource_filter/core/common/BUILD.gn
+@@ -9,6 +9,7 @@
+     "activation_decision.h",
+     "activation_list.cc",
+     "activation_list.h",
++    "cosmetic_exceptions.h",
+     "activation_scope.cc",
+     "activation_scope.h",
+     "common_features.cc",
+diff --git a/components/subresource_filter/core/common/cosmetic_exceptions.h b/components/subresource_filter/core/common/cosmetic_exceptions.h
+new file mode 100644
+--- /dev/null
++++ b/components/subresource_filter/core/common/cosmetic_exceptions.h
+@@ -0,0 +1,11 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#ifndef COMPONENTS_SUBRESOURCE_FILTER_CORE_COMMON_COSMETIC_EXCEPTIONS_H_
++#define COMPONENTS_SUBRESOURCE_FILTER_CORE_COMMON_COSMETIC_EXCEPTIONS_H_
++namespace subresource_filter {
++struct CosmeticActivation {
++  bool disable_generic = false;
++  bool disable_all = false;
++};
++}  // namespace subresource_filter
++#endif
+diff --git a/components/subresource_filter/core/common/senda_generation_unittest.cc b/components/subresource_filter/core/common/senda_generation_unittest.cc
+new file mode 100644
+--- /dev/null
++++ b/components/subresource_filter/core/common/senda_generation_unittest.cc
+@@ -0,0 +1,87 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#include "components/subresource_filter/core/common/indexed_ruleset.h"
++#include "components/subresource_filter/core/common/unindexed_ruleset.h"
++#include "components/url_pattern_index/proto/rules.pb.h"
++#include "testing/gtest/include/gtest/gtest.h"
++#include "third_party/protobuf/src/google/protobuf/io/zero_copy_stream_impl_lite.h"
++#include "url/gurl.h"
++
++namespace subresource_filter {
++namespace {
++namespace proto = url_pattern_index::proto;
++
++TEST(SendaGenerationTest, DevelopmentPackagerWireFormatMatchesNativeReader) {
++  const std::string bytes = "\x0d\x1a\x0b\x0a\x09keep.test";
++  google::protobuf::io::ArrayInputStream input(bytes.data(), bytes.size());
++  UnindexedRulesetReader reader(&input);
++  proto::FilteringRules chunk;
++  ASSERT_TRUE(reader.ReadNextChunk(&chunk));
++  ASSERT_TRUE(chunk.has_cosmetic_exceptions());
++  ASSERT_EQ(1, chunk.cosmetic_exceptions().generic_domains_size());
++  EXPECT_EQ("keep.test", chunk.cosmetic_exceptions().generic_domains(0));
++}
++
++TEST(SendaGenerationTest, ExceptionOnlyChunkSurvivesSerialization) {
++  proto::CosmeticExceptions exceptions;
++  exceptions.add_generic_domains("keep.test");
++  exceptions.add_all_domains("all.test");
++  exceptions.add_generic_prefixes("www.google.");
++  exceptions.add_all_prefixes("music.amazon.");
++  exceptions.add_generic_url_substrings("://localhost:");
++  exceptions.add_all_url_substrings("://192.168.");
++  exceptions.set_disable_all_generic(true);
++  exceptions.set_disable_all_cosmetic(true);
++  std::string bytes;
++  {
++    google::protobuf::io::StringOutputStream output(&bytes);
++    UnindexedRulesetWriter writer(&output);
++    EXPECT_TRUE(writer.SetCosmeticExceptions(exceptions));
++    EXPECT_TRUE(writer.Finish());
++  }
++  google::protobuf::io::ArrayInputStream input(bytes.data(), bytes.size());
++  UnindexedRulesetReader reader(&input);
++  proto::FilteringRules chunk;
++  ASSERT_TRUE(reader.ReadNextChunk(&chunk));
++  EXPECT_EQ(exceptions.SerializeAsString(),
++            chunk.cosmetic_exceptions().SerializeAsString());
++  EXPECT_FALSE(reader.ReadNextChunk(&chunk));
++}
++
++TEST(SendaGenerationTest, DocumentKeepsItsOwnExceptions) {
++  proto::CosmeticExceptions exceptions;
++  exceptions.add_generic_domains("keep.test");
++  exceptions.add_all_domains("all.test");
++  exceptions.add_generic_prefixes("www.google.");
++  exceptions.add_generic_url_substrings("://localhost:");
++  RulesetIndexer old_generation(1), new_generation(2);
++  old_generation.SetCosmeticExceptions(exceptions);
++  old_generation.Finish();
++  exceptions.set_disable_all_cosmetic(true);
++  new_generation.SetCosmeticExceptions(exceptions);
++  new_generation.Finish();
++  IndexedRulesetMatcher old_rules(old_generation.data());
++  IndexedRulesetMatcher new_rules(new_generation.data());
++  auto evaluate = [&](const char* url) {
++    return old_rules.GetCosmeticActivation(GURL(url), GURL(url));
++  };
++  EXPECT_TRUE(evaluate("https://sub.keep.test/").disable_generic);
++  EXPECT_FALSE(evaluate("https://notkeep.test/").disable_generic);
++  EXPECT_TRUE(evaluate("https://all.test/").disable_all);
++  EXPECT_TRUE(evaluate("https://www.google.co.uk/search").disable_generic);
++  EXPECT_TRUE(evaluate("https://page.test/path/://localhost:123/").disable_generic);
++  EXPECT_FALSE(evaluate("https://ordinary.test/").disable_all);
++  EXPECT_TRUE(new_rules.GetCosmeticActivation(
++      GURL("https://ordinary.test/"), GURL()).disable_all);
++  EXPECT_TRUE(old_rules.GetCosmeticActivation(
++      GURL("about:blank"), GURL("https://all.test/")).disable_all);
++}
++
++TEST(SendaGenerationTest, LegacyMissingMetadataDoesNotHideContent) {
++  RulesetIndexer indexer(1);
++  indexer.Finish();
++  IndexedRulesetMatcher rules(indexer.data());
++  EXPECT_TRUE(rules.GetCosmeticActivation(GURL("https://test/"), GURL()).disable_all);
++}
++}  // namespace
++}  // namespace subresource_filter
+diff --git a/components/subresource_filter/core/common/unindexed_ruleset.h b/components/subresource_filter/core/common/unindexed_ruleset.h
+--- a/components/subresource_filter/core/common/unindexed_ruleset.h
++++ b/components/subresource_filter/core/common/unindexed_ruleset.h
+@@ -81,6 +81,8 @@
+   // grown up to |max_rules_per_chunk|.
+   bool AddUrlRule(const url_pattern_index::proto::UrlRule& rule);
+   bool AddStyleRule(const url_pattern_index::proto::StyleRule& rule);
++  bool SetCosmeticExceptions(
++      const url_pattern_index::proto::CosmeticExceptions& exceptions);
+ 
+   // Finalizes the serialization of the unindexed ruleset, i.e., writes the
+   // final chunk of rules, if there are any still pending. This method *should*
+@@ -104,6 +106,7 @@
+ 
+   const int max_rules_per_chunk_ = 0;
+   url_pattern_index::proto::FilteringRules pending_chunk_;
++  bool exceptions_written_ = false;
+ };
+ 
+ }  // namespace subresource_filter
+diff --git a/components/subresource_filter/core/common/unindexed_ruleset.cc b/components/subresource_filter/core/common/unindexed_ruleset.cc
+--- a/components/subresource_filter/core/common/unindexed_ruleset.cc
++++ b/components/subresource_filter/core/common/unindexed_ruleset.cc
+@@ -67,9 +67,20 @@
+   return true;
+ }
+ 
++bool UnindexedRulesetWriter::SetCosmeticExceptions(
++    const proto::CosmeticExceptions& exceptions) {
++  if (had_error() || exceptions_written_) {
++    return false;
++  }
++  exceptions_written_ = true;
++  pending_chunk_.mutable_cosmetic_exceptions()->CopyFrom(exceptions);
++  return true;
++}
++
+ bool UnindexedRulesetWriter::IsPendingChunkEmpty() const {
+   return pending_chunk_.url_rules_size() == 0 &&
+-         pending_chunk_.style_rules_size() == 0;
++         pending_chunk_.style_rules_size() == 0 &&
++         !pending_chunk_.has_cosmetic_exceptions();
+ }
+ 
+ bool UnindexedRulesetWriter::Finish() {
+diff --git a/components/subresource_filter/core/common/indexed_ruleset.h b/components/subresource_filter/core/common/indexed_ruleset.h
+--- a/components/subresource_filter/core/common/indexed_ruleset.h
++++ b/components/subresource_filter/core/common/indexed_ruleset.h
+@@ -18,6 +18,7 @@
+ #include "base/numerics/safe_conversions.h"
+ #include "components/subresource_filter/core/common/flat/indexed_ruleset_generated.h"
+ #include "components/subresource_filter/core/common/load_policy.h"
++#include "components/subresource_filter/core/common/cosmetic_exceptions.h"
+ #include "components/subresource_filter/core/common/style_rule_indexer.h"
+ #include "components/subresource_filter/core/common/style_rule_matcher.h"
+ #include "components/url_pattern_index/url_pattern_index.h"
+@@ -32,6 +33,7 @@
+ namespace url_pattern_index {
+ namespace proto {
+ class StyleRule;
++class CosmeticExceptions;
+ class UrlRule;
+ }
+ }  // namespace url_pattern_index
+@@ -87,6 +89,8 @@
+ 
+   // Adds |rule| to the style rule index.
+   bool AddStyleRuleFromProto(const url_pattern_index::proto::StyleRule& rule);
++  void SetCosmeticExceptions(
++      const url_pattern_index::proto::CosmeticExceptions& exceptions);
+ 
+   // Finalizes construction of the data structures.
+   void Finish();
+@@ -117,6 +121,7 @@
+   url_pattern_index::FlatDomainMap domain_map_;
+ 
+   uint64_t ruleset_id_ = 0;
++  flatbuffers::Offset<flat::CosmeticExceptions> cosmetic_exceptions_;
+ };
+ 
+ // Matches URLs against the FlatBuffer representation of an indexed ruleset.
+@@ -131,6 +136,8 @@
+   // Creates an instance that matches URLs against the flat::IndexedRuleset
+   // provided as the root object of serialized data in the |buffer|.
+   explicit IndexedRulesetMatcher(base::span<const uint8_t> buffer);
++  CosmeticActivation GetCosmeticActivation(const GURL& document_url,
++                                           const GURL& origin_url) const;
+ 
+   IndexedRulesetMatcher(const IndexedRulesetMatcher&) = delete;
+   IndexedRulesetMatcher& operator=(const IndexedRulesetMatcher&) = delete;
+diff --git a/components/subresource_filter/core/common/indexed_ruleset.cc b/components/subresource_filter/core/common/indexed_ruleset.cc
+--- a/components/subresource_filter/core/common/indexed_ruleset.cc
++++ b/components/subresource_filter/core/common/indexed_ruleset.cc
+@@ -82,7 +82,7 @@
+ 
+ // RulesetIndexer --------------------------------------------------------------
+ 
+-const int RulesetIndexer::kIndexedFormatVersion = 38;
++const int RulesetIndexer::kIndexedFormatVersion = 39;
+ 
+ // This static assert is meant to catch cases where
+ // url_pattern_index::kUrlPatternIndexFormatVersion is incremented without
+@@ -129,6 +129,28 @@
+   return style_rule_indexer_.AddStyleRuleFromProto(rule);
+ }
+ 
++void RulesetIndexer::SetCosmeticExceptions(
++    const proto::CosmeticExceptions& exceptions) {
++  auto strings = [this](const auto& values) {
++    std::vector<flatbuffers::Offset<flatbuffers::String>> offsets;
++    offsets.reserve(values.size());
++    for (const auto& value : values) {
++      offsets.push_back(builder_.CreateString(value));
++    }
++    return builder_.CreateVector(offsets);
++  };
++  const auto generic_domains = strings(exceptions.generic_domains());
++  const auto all_domains = strings(exceptions.all_domains());
++  const auto generic_prefixes = strings(exceptions.generic_prefixes());
++  const auto all_prefixes = strings(exceptions.all_prefixes());
++  const auto generic_fragments = strings(exceptions.generic_url_substrings());
++  const auto all_fragments = strings(exceptions.all_url_substrings());
++  cosmetic_exceptions_ = flat::CreateCosmeticExceptions(
++      builder_, generic_domains, all_domains, generic_prefixes, all_prefixes,
++      generic_fragments, all_fragments, exceptions.disable_all_generic(),
++      exceptions.disable_all_cosmetic());
++}
++
+ void RulesetIndexer::Finish() {
+   auto blocklist_offset = blocklist_.Finish();
+   auto allowlist_offset = allowlist_.Finish();
+@@ -138,7 +160,7 @@
+ 
+   auto url_rules_index_offset = flat::CreateIndexedRuleset(
+       builder_, blocklist_offset, allowlist_offset, deactivation_offset,
+-      style_rule_index_offset, ruleset_id_);
++      style_rule_index_offset, ruleset_id_, cosmetic_exceptions_);
+   builder_.Finish(url_rules_index_offset);
+ }
+ 
+@@ -174,6 +196,62 @@
+ 
+ IndexedRulesetMatcher::~IndexedRulesetMatcher() = default;
+ 
++CosmeticActivation IndexedRulesetMatcher::GetCosmeticActivation(
++    const GURL& document_url,
++    const GURL& origin_url) const {
++  const auto* exceptions = root_->cosmetic_exceptions();
++  if (!exceptions) {
++    // Legacy resources have no activation metadata: prefer underblocking.
++    return {.disable_generic = true, .disable_all = true};
++  }
++  const std::string_view host = origin_url.host();
++  const auto matches = [&](const auto* domains, const auto* prefixes,
++                           const auto* fragments) {
++    if (domains) {
++      for (const auto* entry : *domains) {
++        const std::string_view domain = entry->string_view();
++        if (host == domain ||
++            (host.size() > domain.size() && host.ends_with(domain) &&
++             host[host.size() - domain.size() - 1] == '.')) {
++          return true;
++        }
++      }
++    }
++    if (prefixes) {
++      for (auto suffix = host; !suffix.empty();) {
++        for (const auto* entry : *prefixes) {
++          if (suffix.starts_with(entry->string_view())) {
++            return true;
++          }
++        }
++        const auto dot = suffix.find('.');
++        if (dot == std::string_view::npos) {
++          break;
++        }
++        suffix.remove_prefix(dot + 1);
++      }
++    }
++    if (fragments) {
++      for (const auto* entry : *fragments) {
++        const auto fragment = entry->string_view();
++        if (document_url.spec().find(fragment) != std::string::npos ||
++            origin_url.spec().find(fragment) != std::string::npos) {
++          return true;
++        }
++      }
++    }
++    return false;
++  };
++  const bool all = exceptions->disable_all_cosmetic() ||
++      matches(exceptions->all_domains(), exceptions->all_prefixes(),
++              exceptions->all_url_substrings());
++  return {.disable_generic = all || exceptions->disable_all_generic() ||
++              matches(exceptions->generic_domains(),
++                      exceptions->generic_prefixes(),
++                      exceptions->generic_url_substrings()),
++          .disable_all = all};
++}
++
+ bool IndexedRulesetMatcher::ShouldDisableFilteringForDocument(
+     const GURL& document_url,
+     const url::Origin& parent_document_origin,
+diff --git a/components/subresource_filter/core/common/document_subresource_filter.h b/components/subresource_filter/core/common/document_subresource_filter.h
+--- a/components/subresource_filter/core/common/document_subresource_filter.h
++++ b/components/subresource_filter/core/common/document_subresource_filter.h
+@@ -76,6 +76,8 @@
+   // Returns the unique ID of the ruleset currently being used for filtering.
+   // Used to partition renderer-side caches by ruleset version.
+   uint64_t GetRulesetId() const;
++  CosmeticActivation GetCosmeticActivation(const GURL& document_url,
++                                           const GURL& origin_url) const;
+ 
+   // Returns true if the ruleset might contain style rules matching the given
+   // `hash` (which is a hash of a class or ID name). This is a fast Bloom
+diff --git a/components/subresource_filter/core/common/document_subresource_filter.cc b/components/subresource_filter/core/common/document_subresource_filter.cc
+--- a/components/subresource_filter/core/common/document_subresource_filter.cc
++++ b/components/subresource_filter/core/common/document_subresource_filter.cc
+@@ -178,4 +178,9 @@
+   return ruleset_matcher_.ruleset_id();
+ }
+ 
++CosmeticActivation DocumentSubresourceFilter::GetCosmeticActivation(
++    const GURL& document_url, const GURL& origin_url) const {
++  return ruleset_matcher_.GetCosmeticActivation(document_url, origin_url);
++}
++
+ }  // namespace subresource_filter
+diff --git a/components/subresource_filter/core/common/flat/indexed_ruleset.fbs b/components/subresource_filter/core/common/flat/indexed_ruleset.fbs
+--- a/components/subresource_filter/core/common/flat/indexed_ruleset.fbs
++++ b/components/subresource_filter/core/common/flat/indexed_ruleset.fbs
+@@ -8,6 +8,17 @@
+ namespace subresource_filter.flat;
+ 
+ // The top-level data structure used to store URL rules.
++table CosmeticExceptions {
++  generic_domains : [string];
++  all_domains : [string];
++  generic_prefixes : [string];
++  all_prefixes : [string];
++  generic_url_substrings : [string];
++  all_url_substrings : [string];
++  disable_all_generic : bool;
++  disable_all_cosmetic : bool;
++}
++
+ table IndexedRuleset {
+   // The index of all blocklist URL rules.
+   blocklist_index : url_pattern_index.flat.UrlPatternIndex;
+@@ -23,6 +34,7 @@
+ 
+   // A unique ID for this indexed ruleset, generated when indexing.
+   ruleset_id : uint64;
++  cosmetic_exceptions : CosmeticExceptions;
+ }
+ 
+ root_type IndexedRuleset;
+diff --git a/components/subresource_filter/content/browser/ruleset_service.cc b/components/subresource_filter/content/browser/ruleset_service.cc
+--- a/components/subresource_filter/content/browser/ruleset_service.cc
++++ b/components/subresource_filter/content/browser/ruleset_service.cc
+@@ -398,6 +398,9 @@
+   size_t num_unsupported_rules = 0;
+   url_pattern_index::proto::FilteringRules ruleset_chunk;
+   while (reader.ReadNextChunk(&ruleset_chunk)) {
++    if (ruleset_chunk.has_cosmetic_exceptions()) {
++      indexer->SetCosmeticExceptions(ruleset_chunk.cosmetic_exceptions());
++    }
+     for (const auto& rule : ruleset_chunk.url_rules()) {
+       if (!indexer->AddUrlRule(rule)) {
+         ++num_unsupported_rules;
+diff --git a/components/subresource_filter/content/renderer/web_document_subresource_filter_impl.h b/components/subresource_filter/content/renderer/web_document_subresource_filter_impl.h
+--- a/components/subresource_filter/content/renderer/web_document_subresource_filter_impl.h
++++ b/components/subresource_filter/content/renderer/web_document_subresource_filter_impl.h
+@@ -94,6 +94,9 @@
+                         std::vector<std::string_view>& out_selectors) override;
+   bool IsDryRun() override;
+   uint64_t GetRulesetId() const override;
++  CosmeticActivation GetCosmeticActivation(
++      const blink::WebURL& document_url,
++      const blink::WebURL& origin_url) const override;
+ 
+   const mojom::ActivationState& activation_state() const {
+     return filter_.activation_state();
+diff --git a/components/subresource_filter/content/renderer/web_document_subresource_filter_impl.cc b/components/subresource_filter/content/renderer/web_document_subresource_filter_impl.cc
+--- a/components/subresource_filter/content/renderer/web_document_subresource_filter_impl.cc
++++ b/components/subresource_filter/content/renderer/web_document_subresource_filter_impl.cc
+@@ -101,6 +101,12 @@
+   return filter_.MaybeHasStyleRule(hash);
+ }
+ 
++CosmeticActivation WebDocumentSubresourceFilterImpl::GetCosmeticActivation(
++    const blink::WebURL& document_url,
++    const blink::WebURL& origin_url) const {
++  return filter_.GetCosmeticActivation(GURL(document_url), GURL(origin_url));
++}
++
+ void WebDocumentSubresourceFilterImpl::GetSelectorsByClass(
+     std::string_view class_name,
+     uint32_t hash,
+diff --git a/third_party/blink/public/platform/web_document_subresource_filter.h b/third_party/blink/public/platform/web_document_subresource_filter.h
+--- a/third_party/blink/public/platform/web_document_subresource_filter.h
++++ b/third_party/blink/public/platform/web_document_subresource_filter.h
+@@ -11,6 +11,7 @@
+ #include <vector>
+ 
+ #include "components/subresource_filter/core/common/scoped_rule.h"
++#include "components/subresource_filter/core/common/cosmetic_exceptions.h"
+ #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-shared.h"
+ 
+ namespace blink {
+@@ -77,6 +78,10 @@
+   // This is used by the renderer (e.g. in SubresourceStyleFilter) to partition
+   // caches by ruleset version.
+   virtual uint64_t GetRulesetId() const = 0;
++  virtual subresource_filter::CosmeticActivation GetCosmeticActivation(
++      const WebURL& document_url, const WebURL& origin_url) const {
++    return {.disable_generic = true, .disable_all = true};
++  }
+ 
+   // Report that a resource loaded by the document (not a preload) was
+   // disallowed.
+diff --git a/third_party/blink/renderer/core/loader/senda_cosmetic_filter.cc b/third_party/blink/renderer/core/loader/senda_cosmetic_filter.cc
+--- a/third_party/blink/renderer/core/loader/senda_cosmetic_filter.cc
++++ b/third_party/blink/renderer/core/loader/senda_cosmetic_filter.cc
+@@ -4,12 +4,12 @@
+ 
+ #include "third_party/blink/renderer/core/loader/senda_cosmetic_filter.h"
+ 
+-#include <array>
+ #include <string_view>
+ 
+ #include "base/location.h"
+ #include "base/task/single_thread_task_runner.h"
+ #include "third_party/blink/public/platform/task_type.h"
++#include "third_party/blink/public/platform/web_url.h"
+ #include "third_party/blink/public/platform/web_document_subresource_filter.h"
+ #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
+ #include "third_party/blink/renderer/core/css/style_engine.h"
+@@ -21,52 +21,10 @@
+ #include "third_party/blink/renderer/platform/wtf/functional.h"
+ #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
+ #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
++#include "third_party/blink/renderer/platform/weborigin/kurl.h"
+ #include "url/origin.h"
+ 
+ namespace blink {
+-namespace {
+-
+-#include "third_party/senda_filter_lists/CosmeticExceptions.inc"
+-
+-template <size_t D, size_t P, size_t U>
+-bool MatchesCosmeticException(
+-    std::string_view host,
+-    std::string_view document_url,
+-    std::string_view origin_url,
+-    const std::array<std::string_view, D>& domains,
+-    const std::array<std::string_view, P>& prefixes,
+-    const std::array<std::string_view, U>& url_substrings) {
+-  for (auto domain : domains) {
+-    if (host == domain ||
+-        (host.size() > domain.size() && host.ends_with(domain) &&
+-         host[host.size() - domain.size() - 1] == '.')) {
+-      return true;
+-    }
+-  }
+-  // Domain anchors may start at a parent hostname boundary.
+-  for (auto suffix = host; !suffix.empty();) {
+-    for (auto prefix : prefixes) {
+-      if (suffix.starts_with(prefix)) {
+-        return true;
+-      }
+-    }
+-    const auto dot = suffix.find('.');
+-    if (dot == std::string_view::npos) {
+-      break;
+-    }
+-    suffix.remove_prefix(dot + 1);
+-  }
+-  for (auto fragment : url_substrings) {
+-    if (document_url.find(fragment) != std::string_view::npos ||
+-        origin_url.find(fragment) != std::string_view::npos) {
+-      return true;
+-    }
+-  }
+-  return false;
+-}
+-
+-}  // namespace
+-
+ const char SendaCosmeticFilter::kSupplementName[] = "SendaCosmeticFilter";
+ SendaCosmeticFilter::SendaCosmeticFilter(
+     Document& document,
+@@ -89,17 +47,10 @@
+   }
+   const auto* origin = document.domWindow()->GetSecurityOrigin()
+                            ->GetOriginOrPrecursorOriginIfOpaque();
+-  const std::string host = origin->Host().Utf8();
+-  const std::string document_url = document.Url().GetString().Utf8();
+-  const std::string origin_url = origin->ToUrlOrigin().GetURL().spec();
+-  const bool all_disabled = kSendaDisableAllCosmetic || MatchesCosmeticException(
+-      host, document_url, origin_url, kSendaAllCosmeticDomains,
+-      kSendaAllCosmeticHostPrefixes, kSendaAllCosmeticUrlSubstrings);
+-  generic_cosmetic_disabled_ = all_disabled || kSendaDisableAllGenericCosmetic ||
+-      MatchesCosmeticException(host, document_url, origin_url,
+-          kSendaGenericCosmeticDomains, kSendaGenericCosmeticHostPrefixes,
+-          kSendaGenericCosmeticUrlSubstrings);
+-  if (all_disabled) {
++  const auto activation = subresource_filter_->GetCosmeticActivation(
++      WebURL(document.Url()), WebURL(KURL(origin->ToString())));
++  generic_cosmetic_disabled_ = activation.disable_generic;
++  if (activation.disable_all) {
+     return;
+   }
+   std::vector<std::string_view> selectors;

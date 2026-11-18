@@ -10,7 +10,7 @@
 *.svg text eol=lf
 *.ps1 text eol=crlf
 *.psm1 text eol=crlf
-*.patch -text
+*.patch -text -whitespace
 *.png binary
 *.ico binary
 assets/filters/UnindexedRules binary

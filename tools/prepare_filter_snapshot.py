@@ -61,6 +61,35 @@ def prepare_cosmetic_exceptions(source_texts):
                 result['fallback_rules'] += 1
     return {key: sorted(value) if isinstance(value, set) else value for key, value in result.items()}
 
+def encode_cosmetic_exception_chunk(exceptions):
+    """Serialize FilteringRules.cosmetic_exceptions (rules.proto field 3).
+
+    Development packaging does not require generated Python protobuf bindings.
+    Native round-trip tests pin this small wire-format adapter to rules.proto.
+    The entire chunk is covered by the ruleset content hash.
+    """
+    def varint(value):
+        output = bytearray()
+        while value >= 128:
+            output.append((value & 127) | 128)
+            value >>= 7
+        output.append(value)
+        return bytes(output)
+
+    fields = ('generic_domains', 'all_domains', 'generic_prefixes',
+              'all_prefixes', 'generic_url_substrings', 'all_url_substrings')
+    payload = bytearray()
+    for field, name in enumerate(fields, 1):
+        for value in exceptions[name]:
+            encoded = value.encode('utf-8')
+            payload.extend(varint((field << 3) | 2) + varint(len(encoded)) + encoded)
+    for field, name in ((7, 'disable_all_generic'), (8, 'disable_all_cosmetic')):
+        if exceptions[name]:
+            payload.extend(varint(field << 3) + b'\x01')
+    chunk = b'\x1a' + varint(len(payload)) + payload
+    return varint(len(chunk)) + chunk
+
+
 def render_cosmetic_exceptions(exceptions):
     text = ('// Derived from EasyList/EasyPrivacy by the Senda filter compiler.\n'
             '// The EasyList authors, CC-BY-SA-3.0; see the accompanying LICENSE.\n'
@@ -145,7 +174,7 @@ def main():
                (ROOT/'third_party/easylist/easyprivacy.txt', 'EasyPrivacy', 'https://easylist.to/easylist/easyprivacy.txt')]
     provenance = [dict(validate_source(path.read_bytes(), title), url=url) for path, title, url in sources]
     exceptions = prepare_cosmetic_exceptions([path.read_text(encoding='utf-8-sig') for path, _, _ in sources])
-    exception_header = render_cosmetic_exceptions(exceptions)
+    exception_chunk = encode_cosmetic_exception_chunk(exceptions)
     bundle = ROOT/'assets/filters'
     bundle.mkdir(parents=True, exist_ok=True)
     logs = ROOT/'.tools'
@@ -169,20 +198,20 @@ def main():
             raise ValueError('Too few supported network rules; previous snapshot preserved')
         convert(['--input_format=filter-list', '--output_format=unindexed-ruleset', '--chrome_version=59',
                  '--input_files='+str(supported_cosmetic)+','+str(network), '--output_file='+str(binary)])
-        data = binary.read_bytes()
+        data = binary.read_bytes() + exception_chunk
         if not 1024 <= len(data) <= 20*1024*1024:
             raise ValueError('Unexpected converted size; previous snapshot preserved')
-        manifest = {'schema': 1, 'format': 'chromium-unindexed-ruleset', 'sources': provenance,
+        manifest = {'schema': 2, 'format': 'chromium-unindexed-ruleset', 'sources': provenance,
                     'network_rules': network_count, 'cosmetic_rules': cosmetic_stats,
                     'cosmetic_exceptions': dict(
                         {key: len(value) if isinstance(value, list) else value for key, value in exceptions.items()},
-                        bytes=len(exception_header), sha256=hashlib.sha256(exception_header).hexdigest()),
+                        storage='ruleset-proto-field-3'),
                     'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data),
                     'license': 'CC-BY-SA-3.0', 'authors': 'The EasyList authors (https://easylist.to/)',
                     'changes': 'Converted supported URL and CSS rules with Chromium. Negative CSS domains become explicit exceptions. Cosmetic activation exceptions are preserved conservatively; unsupported hiding syntax is omitted.'}
         license_text = 'EasyList and EasyPrivacy\nThe EasyList authors (https://easylist.to/)\n\nChanges: '+manifest['changes']+'\n\n'
         license_text += (ROOT/'third_party/easylist/LICENSE-CC-BY-SA-3.0.txt').read_text(encoding='utf-8')
-        for name, content in [('UnindexedRules', data), ('CosmeticExceptions.inc', exception_header), ('LICENSE', license_text.encode()),
+        for name, content in [('UnindexedRules', data), ('LICENSE', license_text.encode()),
                               ('manifest.json', (json.dumps(manifest, indent=2)+'\n').encode())]:
             staged = bundle/(name+'.tmp')
             staged.write_bytes(content)

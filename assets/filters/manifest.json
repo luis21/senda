@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "format": "chromium-unindexed-ruleset",
   "sources": [
     {
@@ -34,11 +34,10 @@
     "disable_all_cosmetic": false,
     "source_rules": 167,
     "fallback_rules": 0,
-    "bytes": 4763,
-    "sha256": "a03d5bd96e5c8401f818d3b4ca4cca6d39d565af64fd6e87ac8fb6f916e66578"
+    "storage": "ruleset-proto-field-3"
   },
-  "sha256": "8b55a844533e1f3583ba206a9c94a5c9a2e8960936823fc4f053656495a0e6c4",
-  "bytes": 5349888,
+  "sha256": "094ed4a33596da4edd2181f273b68715a59c66fcb4466fb84fc38289f86a58fb",
+  "bytes": 5352714,
   "license": "CC-BY-SA-3.0",
   "authors": "The EasyList authors (https://easylist.to/)",
   "changes": "Converted supported URL and CSS rules with Chromium. Negative CSS domains become explicit exceptions. Cosmetic activation exceptions are preserved conservatively; unsupported hiding syntax is omitted."
