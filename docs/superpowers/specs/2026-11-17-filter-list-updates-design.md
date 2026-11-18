@@ -1,6 +1,6 @@
 # Actualización de listas de protección de Senda
 
-Fecha: 2026-11-17. Estado: diseño pendiente de aprobación de Luis.
+Fecha: 2026-11-17. Estado: diseño aprobado por Luis al indicar «continua» tras la solicitud de aprobación.
 
 ## Objetivo y decisión del usuario
 
