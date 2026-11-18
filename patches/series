@@ -9,3 +9,4 @@
 0009-senda-windows-icons.patch
 0010-senda-stopped-service-worker.patch
 0011-senda-filter-generation.patch
+0012-senda-sandboxed-filter-compiler.patch

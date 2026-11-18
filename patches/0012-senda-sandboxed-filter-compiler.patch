@@ -1,0 +1,806 @@
+diff --git a/chrome/browser/subresource_filter/BUILD.gn b/chrome/browser/subresource_filter/BUILD.gn
+--- a/chrome/browser/subresource_filter/BUILD.gn
++++ b/chrome/browser/subresource_filter/BUILD.gn
+@@ -119,6 +119,7 @@
+     "//components/history/core/browser",
+     "//components/history/core/test",
+     "//components/subresource_filter/content/browser",
++    "//components/subresource_filter/tools/rule_parser:senda_filter_compiler",
+     "//content/test:test_support",
+     "//testing/gtest",
+   ]
+@@ -208,6 +209,7 @@
+       "//components/page_load_metrics/browser:test_support",
+       "//components/page_load_metrics/browser/observers/ad_metrics",
+       "//components/subresource_filter/content/browser",
++      "//components/subresource_filter/tools/rule_parser:senda_filter_compiler",
+       "//content/test:test_support",
+       "//testing/gtest",
+     ]
+@@ -222,14 +224,18 @@
+ }
+ 
+ import("//testing/test.gni")
++
+ test("senda_filter_updates_unittests") {
+   sources = [
++    "//components/subresource_filter/core/common/senda_generation_unittest.cc",
++    "//components/subresource_filter/tools/rule_parser/senda_filter_compiler_unittest.cc",
++    "//components/subresource_filter/tools/rule_parser/senda_filter_official_unittest.cc",
+     "senda_filter_updates_test_main.cc",
+-    "//components/subresource_filter/core/common/senda_generation_unittest.cc",
+   ]
+   deps = [
+     "//base",
+     "//components/subresource_filter/core/common",
++    "//components/subresource_filter/tools/rule_parser:senda_filter_compiler",
+     "//components/url_pattern_index/proto:url_pattern_index",
+     "//testing/gtest",
+     "//third_party/protobuf:protobuf_lite",
+diff --git a/chrome/utility/BUILD.gn b/chrome/utility/BUILD.gn
+--- a/chrome/utility/BUILD.gn
++++ b/chrome/utility/BUILD.gn
+@@ -55,6 +55,7 @@
+     "//components/services/patch:lib",
+     "//components/services/unzip:lib",
+     "//components/strings",
++    "//components/subresource_filter/content/utility:senda_filter_compiler",
+     "//components/url_formatter",
+     "//components/user_data_importer/content",
+     "//components/user_data_importer/mojom",
+diff --git a/chrome/utility/services.cc b/chrome/utility/services.cc
+--- a/chrome/utility/services.cc
++++ b/chrome/utility/services.cc
+@@ -3,6 +3,7 @@
+ // found in the LICENSE file.
+ 
+ #include "chrome/utility/services.h"
++#include "components/subresource_filter/content/utility/senda_filter_compiler_impl.h"
+ 
+ #include <memory>
+ #include <utility>
+@@ -497,6 +498,9 @@
+ }
+ 
+ void RegisterMainThreadServices(mojo::ServiceFactory& services) {
++  services.Add(+[](mojo::PendingReceiver<senda::mojom::FilterCompiler> receiver) {
++    return std::make_unique<subresource_filter::SendaFilterCompilerImpl>(std::move(receiver));
++  });
+   services.Add(RunFilePatcher);
+   services.Add(RunUnzipper);
+   services.Add(RunCSVPasswordParser);
+diff --git a/components/subresource_filter/tools/rule_parser/BUILD.gn b/components/subresource_filter/tools/rule_parser/BUILD.gn
+--- a/components/subresource_filter/tools/rule_parser/BUILD.gn
++++ b/components/subresource_filter/tools/rule_parser/BUILD.gn
+@@ -42,3 +42,18 @@
+   sources = [ "rule_parser_fuzzer.cc" ]
+   deps = [ ":rule_parser" ]
+ }
++
++source_set("senda_filter_compiler") {
++  sources = [
++    "senda_filter_compiler.cc",
++    "senda_filter_compiler.h",
++  ]
++  public_deps = [ "//base" ]
++  deps = [
++    ":rule_parser",
++    "//components/subresource_filter/core/common",
++    "//components/subresource_filter/tools/ruleset_converter:support",
++    "//crypto",
++    "//third_party/protobuf:protobuf_lite",
++  ]
++}
+diff --git a/components/subresource_filter/tools/rule_parser/senda_filter_compiler.h b/components/subresource_filter/tools/rule_parser/senda_filter_compiler.h
+new file mode 100644
+--- /dev/null
++++ b/components/subresource_filter/tools/rule_parser/senda_filter_compiler.h
+@@ -0,0 +1,24 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#ifndef COMPONENTS_SUBRESOURCE_FILTER_TOOLS_RULE_PARSER_SENDA_FILTER_COMPILER_H_
++#define COMPONENTS_SUBRESOURCE_FILTER_TOOLS_RULE_PARSER_SENDA_FILTER_COMPILER_H_
++#include <array>
++#include <string>
++#include "base/files/file.h"
++namespace subresource_filter {
++enum class CompileStatus { kSuccess, kInvalidSource, kLimitExceeded, kWriteFailure };
++struct CompileResult {
++  CompileStatus status = CompileStatus::kInvalidSource;
++  std::array<std::string, 2> versions;
++  std::array<std::string, 2> source_hashes;
++  std::string ruleset_sha256;
++  uint32_t network_rules = 0;
++  uint32_t cosmetic_rules = 0;
++  // Conservative accounting for staged selector text and tree nodes, not RSS.
++  uint32_t peak_style_bytes = 0;
++};
++CompileResult CompileSendaFilters(base::File easylist,
++                                 base::File easyprivacy,
++                                 base::File output);
++}  // namespace subresource_filter
++#endif
+diff --git a/components/subresource_filter/tools/rule_parser/senda_filter_compiler.cc b/components/subresource_filter/tools/rule_parser/senda_filter_compiler.cc
+new file mode 100644
+--- /dev/null
++++ b/components/subresource_filter/tools/rule_parser/senda_filter_compiler.cc
+@@ -0,0 +1,374 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#include "components/subresource_filter/tools/rule_parser/senda_filter_compiler.h"
++
++#include <algorithm>
++#include <set>
++#include <string_view>
++#include <utility>
++#include <vector>
++#include "base/containers/span.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_split.h"
++#include "base/strings/string_util.h"
++#include "base/time/time.h"
++#include "components/subresource_filter/core/common/unindexed_ruleset.h"
++#include "components/subresource_filter/tools/rule_parser/rule_parser.h"
++#include "components/subresource_filter/tools/ruleset_converter/rule_stream.h"
++#include "crypto/hash.h"
++#include "third_party/protobuf/src/google/protobuf/io/zero_copy_stream_impl_lite.h"
++
++namespace subresource_filter {
++namespace {
++namespace proto = url_pattern_index::proto;
++constexpr size_t kSourceLimit = 20 * 1024 * 1024;
++constexpr size_t kLineLimit = 64 * 1024;
++constexpr size_t kLineCountLimit = 1000000;
++constexpr size_t kMetadataLimit = 1024 * 1024;
++
++bool Domain(std::string_view value) {
++  return !value.empty() && std::ranges::all_of(value, [](char c) {
++    return base::IsAsciiAlpha(c) || base::IsAsciiDigit(c) || c == '_' ||
++           c == '.' || c == '-';
++  });
++}
++
++bool Selector(std::string_view value) {
++  if (value.empty() || !base::IsStringASCII(value) ||
++      std::ranges::any_of(value, [](char c) { return c < 32 || c == 127; })) {
++    return false;
++  }
++  for (auto token : {"{", "}", "/*", "*/", "@", ":style(", ":-abp-",
++                     ":has-text(", ":matches-css("}) {
++    if (value.find(token) != std::string_view::npos) {
++      return false;
++    }
++  }
++  char quote = 0;
++  bool escaped = false;
++  int brackets = 0, parentheses = 0;
++  for (char c : value) {
++    if (escaped) { escaped = false; continue; }
++    if (c == '\\') { escaped = true; continue; }
++    if (quote) {
++      if (c == quote) { quote = 0; }
++      continue;
++    }
++    if (c == '\'' || c == '"') { quote = c; continue; }
++    if (c == ';') { return false; }
++    if (c == '[') { ++brackets; }
++    if (c == ']' && --brackets < 0) { return false; }
++    if (c == '(') { ++parentheses; }
++    if (c == ')' && --parentheses < 0) { return false; }
++  }
++  return !quote && !escaped && brackets == 0 && parentheses == 0;
++}
++
++// Iteration never allocates a vector proportional to the number of lines.
++template <typename Callback>
++CompileStatus Lines(std::string_view text, Callback callback) {
++  size_t number = 0;
++  while (!text.empty()) {
++    const auto end = text.find('\n');
++    auto line = text.substr(0, end);
++    if (line.size() > kLineLimit || ++number > kLineCountLimit) {
++      return CompileStatus::kLimitExceeded;
++    }
++    if (line.ends_with('\r')) {
++      line.remove_suffix(1);
++    }
++    if (!callback(line, number)) {
++      return CompileStatus::kInvalidSource;
++    }
++    if (end == std::string_view::npos) {
++      break;
++    }
++    text.remove_prefix(end + 1);
++  }
++  return CompileStatus::kSuccess;
++}
++
++bool Version(std::string_view value) {
++  if (value.size() != 12 || !std::ranges::all_of(value, base::IsAsciiDigit<char>)) {
++    return false;
++  }
++  base::Time::Exploded exploded = {};
++  if (!base::StringToInt(value.substr(0, 4), &exploded.year) ||
++      !base::StringToInt(value.substr(4, 2), &exploded.month) ||
++      !base::StringToInt(value.substr(6, 2), &exploded.day_of_month) ||
++      !base::StringToInt(value.substr(8, 2), &exploded.hour) ||
++      !base::StringToInt(value.substr(10, 2), &exploded.minute)) {
++    return false;
++  }
++  base::Time parsed;
++  if (!base::Time::FromUTCExploded(exploded, &parsed)) {
++    return false;
++  }
++  base::Time::Exploded actual;
++  parsed.UTCExplode(&actual);
++  return actual.year == exploded.year && actual.month == exploded.month &&
++         actual.day_of_month == exploded.day_of_month && actual.hour == exploded.hour &&
++         actual.minute == exploded.minute;
++}
++
++CompileStatus ReadSource(base::File& file, std::string_view title,
++                         std::string& text, std::string& version,
++                         std::string& hash) {
++  const auto size = file.GetLength();
++  if (size > static_cast<int64_t>(kSourceLimit)) {
++    return CompileStatus::kLimitExceeded;
++  }
++  if (size < 1024) {
++    return CompileStatus::kInvalidSource;
++  }
++  text.resize(size);
++  if (!file.ReadAndCheck(0, base::as_writable_byte_span(text)) || !base::IsStringUTF8(text)) {
++    return CompileStatus::kInvalidSource;
++  }
++  hash = base::HexEncodeLower(crypto::hash::Sha256(text));
++  std::string_view view = text;
++  if (view.starts_with("\xef\xbb\xbf")) {
++    view.remove_prefix(3);
++  }
++  if (!view.starts_with("[Adblock Plus ")) {
++    return CompileStatus::kInvalidSource;
++  }
++  bool found_title = false;
++  size_t versions = 0, rules = 0;
++  auto status = Lines(view, [&](std::string_view line, size_t number) {
++    if (number <= 20) {
++      found_title |= line == std::string("! Title: ") + std::string(title);
++      if (line.starts_with("! Version: ")) {
++        ++versions;
++        version = line.substr(11);
++      }
++    }
++    rules += !line.empty() && !line.starts_with('!') && !line.starts_with('[');
++    return true;
++  });
++  if (status != CompileStatus::kSuccess) {
++    return status;
++  }
++  return found_title && versions == 1 && Version(version) && rules >= 100
++             ? CompileStatus::kSuccess : CompileStatus::kInvalidSource;
++}
++
++struct Exceptions {
++  // Same field ordering as CosmeticExceptions in rules.proto.
++  std::array<std::set<std::string>, 6> values;
++  bool generic = false, all = false;
++  size_t bytes = 0;
++  void Add(size_t field, std::string_view value) {
++    if (bytes <= kMetadataLimit && values[field].insert(std::string(value)).second) {
++      bytes += value.size() + 8;
++    }
++  }
++  void Parse(std::string_view line) {
++    const auto dollar = line.rfind('$');
++    if (!line.starts_with("@@") || dollar == std::string_view::npos) {
++      return;
++    }
++    const auto lower = base::ToLowerASCII(line.substr(dollar + 1));
++    const auto options = base::SplitStringPiece(lower, ",", base::KEEP_WHITESPACE,
++                                               base::SPLIT_WANT_ALL);
++    bool full = false, global = false;
++    for (auto option : options) {
++      if (option.starts_with('~')) {
++        option.remove_prefix(1);
++      }
++      full |= option == "elemhide" || option == "ehide" ||
++              option == "specifichide" || option == "shide";
++      global |= option == "generichide" || option == "ghide";
++    }
++    if (!full && !global) {
++      return;
++    }
++    const size_t category = full ? 1 : 0;
++    auto pattern = line.substr(2, dollar - 2);
++    bool covered = false;
++    if (pattern.starts_with("||")) {
++      const auto host_end = pattern.find_first_of("^/:?", 2);
++      const auto host = base::ToLowerASCII(pattern.substr(2, host_end - 2));
++      if (Domain(host)) {
++        Add(category + (host_end == std::string_view::npos ? 2 : 0), host);
++        covered = true;
++      } else if (host.ends_with('*') && Domain(std::string_view(host).substr(0, host.size() - 1))) {
++        Add(category + 2, std::string_view(host).substr(0, host.size() - 1));
++        covered = true;
++      }
++    } else if (pattern.starts_with("://") && pattern.size() > 3 &&
++               std::ranges::all_of(pattern.substr(3), [](char c) {
++                 return base::IsAsciiAlpha(c) || base::IsAsciiDigit(c) ||
++                        std::string_view("_.:/-").contains(c);
++               })) {
++      Add(category + 4, pattern);
++      covered = true;
++    } else if (pattern.empty()) {
++      size_t domain_options = 0;
++      std::vector<std::string_view> domains;
++      for (auto option : options) {
++        if (option.starts_with("domain=")) {
++          ++domain_options;
++          domains = base::SplitStringPiece(option.substr(7), "|", base::KEEP_WHITESPACE,
++                                           base::SPLIT_WANT_ALL);
++        }
++      }
++      bool valid = domain_options == 1;
++      bool any = false;
++      for (auto domain : domains) {
++        if (!domain.starts_with('~')) {
++          any = true;
++          valid &= Domain(domain);
++        }
++      }
++      if (valid && any) {
++        for (auto domain : domains) {
++          if (!domain.starts_with('~')) {
++            Add(category, domain);
++          }
++        }
++        covered = true;
++      }
++    }
++    if (!covered) {
++      (full ? all : generic) = true;
++    }
++  }
++  proto::CosmeticExceptions ToProto() const {
++    proto::CosmeticExceptions result;
++    auto copy = [](const auto& source, auto* target) {
++      for (const auto& value : source) { *target->Add() = value; }
++    };
++    copy(values[0], result.mutable_generic_domains());
++    copy(values[1], result.mutable_all_domains());
++    copy(values[2], result.mutable_generic_prefixes());
++    copy(values[3], result.mutable_all_prefixes());
++    copy(values[4], result.mutable_generic_url_substrings());
++    copy(values[5], result.mutable_all_url_substrings());
++    result.set_disable_all_generic(generic);
++    result.set_disable_all_cosmetic(all);
++    return result;
++  }
++};
++
++bool InsertStyle(std::set<std::string>& target, std::string rule,
++                 uint32_t& buffered_bytes) {
++  if (target.contains(rule)) { return true; }
++  const auto cost = rule.size() + 64;
++  if (cost > kSourceLimit - buffered_bytes) { return false; }
++  buffered_bytes += cost;
++  target.insert(std::move(rule));
++  return true;
++}
++
++bool NormalizeStyle(std::string_view line, std::set<std::string>& rules,
++                    std::set<std::string>& unsafe, uint32_t& buffered_bytes) {
++  const auto exception = line.find("#@#");
++  const bool allow = exception != std::string_view::npos;
++  const auto marker = allow ? exception : line.find("##");
++  if (marker == std::string_view::npos) {
++    return true;
++  }
++  const auto selector = line.substr(marker + (allow ? 3 : 2));
++  const auto domain_text = line.substr(0, marker);
++  const auto domains = base::SplitStringPiece(domain_text, ",", base::KEEP_WHITESPACE,
++                                             base::SPLIT_WANT_NONEMPTY);
++  bool valid = Selector(selector);
++  std::string positive;
++  for (auto domain : domains) {
++    bool negative = domain.starts_with('~');
++    valid &= Domain(negative ? domain.substr(1) : domain);
++    valid &= !allow || !negative;
++    if (!negative) {
++      if (!positive.empty()) { positive += ','; }
++      positive += domain;
++    }
++  }
++  valid &= !allow || !domains.empty();
++  if (!valid) {
++    return !allow || InsertStyle(unsafe, std::string(selector), buffered_bytes);
++  }
++  if (!InsertStyle(rules, positive + (allow ? "#@#" : "##") + std::string(selector),
++                    buffered_bytes)) { return false; }
++  if (!allow) {
++    for (auto domain : domains) {
++      if (domain.starts_with('~')) {
++        if (!InsertStyle(rules, std::string(domain.substr(1)) + "#@#" +
++                                 std::string(selector), buffered_bytes)) { return false; }
++      }
++    }
++  }
++  return true;
++}
++}  // namespace
++
++CompileResult CompileSendaFilters(base::File easylist, base::File easyprivacy,
++                                 base::File output) {
++  CompileResult result;
++  if (!output.IsValid()) {
++    result.status = CompileStatus::kWriteFailure;
++    return result;
++  }
++  std::array<std::string, 2> sources;
++  result.status = ReadSource(easylist, "EasyList", sources[0], result.versions[0], result.source_hashes[0]);
++  if (result.status != CompileStatus::kSuccess) { return result; }
++  result.status = ReadSource(easyprivacy, "EasyPrivacy", sources[1], result.versions[1], result.source_hashes[1]);
++  if (result.status != CompileStatus::kSuccess) { return result; }
++  std::string encoded;
++  Exceptions exceptions;
++  std::set<std::string> styles, unsafe;
++  RuleParser parser;
++  bool limit = false;
++  {
++    google::protobuf::io::StringOutputStream stream(&encoded);
++    UnindexedRulesetWriter writer(&stream);
++    for (const auto& text : sources) {
++      Lines(text, [&](std::string_view line, size_t) {
++        exceptions.Parse(line);
++        if (line.contains("##") || line.contains("#@#")) {
++          limit |= !NormalizeStyle(line, styles, unsafe, result.peak_style_bytes);
++        } else if (parser.Parse(line) == proto::RULE_TYPE_URL) {
++          auto rule = parser.url_rule().ToProtobuf();
++          if (!DeleteUrlRuleOrAmend(&rule, 59)) {
++            writer.AddUrlRule(rule);
++            ++result.network_rules;
++          }
++        }
++        limit |= encoded.size() > kSourceLimit || exceptions.bytes > kMetadataLimit;
++        return !limit;
++      });
++      if (limit) { break; }
++    }
++    // Domain-specific rules must precede generic rules in the style index.
++    for (bool generic : {false, true}) {
++      for (const auto& line : styles) {
++        if (limit) { break; }
++        if (line.starts_with("##") != generic) { continue; }
++        const auto marker = line.find(line.contains("#@#") ? "#@#" : "##");
++        const auto selector = line.substr(marker + (line.contains("#@#") ? 3 : 2));
++        if (unsafe.contains(selector) || parser.Parse(line) != proto::RULE_TYPE_STYLE) { continue; }
++        auto rule = parser.style_rule().ToProtobuf();
++        if (!DeleteStyleRuleOrAmend(&rule)) {
++          writer.AddStyleRule(rule);
++          ++result.cosmetic_rules;
++        }
++        limit |= encoded.size() > kSourceLimit;
++      }
++    }
++    writer.SetCosmeticExceptions(exceptions.ToProto());
++    writer.Finish();
++  }
++  if (limit || encoded.size() > kSourceLimit) {
++    result.status = CompileStatus::kLimitExceeded;
++  } else if (result.network_rules < 1000) {
++    result.status = CompileStatus::kInvalidSource;
++  } else if (!output.SetLength(0) || output.Seek(base::File::FROM_BEGIN, 0) != 0 ||
++             !output.WriteAtCurrentPosAndCheck(base::as_byte_span(encoded)) || !output.Flush()) {
++    result.status = CompileStatus::kWriteFailure;
++  } else {
++    result.ruleset_sha256 = base::HexEncodeLower(crypto::hash::Sha256(encoded));
++    result.status = CompileStatus::kSuccess;
++  }
++  return result;
++}
++}  // namespace subresource_filter
+diff --git a/components/subresource_filter/tools/rule_parser/senda_filter_compiler_unittest.cc b/components/subresource_filter/tools/rule_parser/senda_filter_compiler_unittest.cc
+new file mode 100644
+--- /dev/null
++++ b/components/subresource_filter/tools/rule_parser/senda_filter_compiler_unittest.cc
+@@ -0,0 +1,114 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#include "components/subresource_filter/tools/rule_parser/senda_filter_compiler.h"
++#include "base/files/file_util.h"
++#include "base/files/scoped_temp_dir.h"
++#include "components/subresource_filter/core/common/unindexed_ruleset.h"
++#include "testing/gtest/include/gtest/gtest.h"
++#include "third_party/protobuf/src/google/protobuf/io/zero_copy_stream_impl_lite.h"
++
++namespace subresource_filter {
++namespace {
++std::string Source(std::string_view title, std::string_view extra = "") {
++  std::string text = "[Adblock Plus 2.0]\n! Title: " + std::string(title) +
++                     "\n! Version: 202611170028\n";
++  for (int i = 0; i < 600; ++i) {
++    text += "||ads" + std::to_string(i) + ".test^\n";
++  }
++  return text + std::string(extra);
++}
++class SendaCompilerTest : public testing::Test {
++ protected:
++  void SetUp() override { ASSERT_TRUE(dir_.CreateUniqueTempDir()); }
++  CompileResult Compile(std::string first, std::string second) {
++    auto list = dir_.GetPath().AppendASCII("easylist");
++    auto privacy = dir_.GetPath().AppendASCII("easyprivacy");
++    EXPECT_TRUE(base::WriteFile(list, first));
++    EXPECT_TRUE(base::WriteFile(privacy, second));
++    return CompileSendaFilters(
++        base::File(list, base::File::FLAG_OPEN | base::File::FLAG_READ),
++        base::File(privacy, base::File::FLAG_OPEN | base::File::FLAG_READ),
++        base::File(dir_.GetPath().AppendASCII("rules"),
++                   base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_WRITE));
++  }
++  base::ScopedTempDir dir_;
++};
++
++TEST_F(SendaCompilerTest, PreservesNetworkCosmeticsAndActivationExceptions) {
++  auto result = Compile(Source("EasyList", "##.ad\n~keep.test##.promo\n"
++      "site.test#@#.ad\n@@||nohide.test^$generichide\n"), Source("EasyPrivacy"));
++  ASSERT_EQ(CompileStatus::kSuccess, result.status);
++  EXPECT_EQ(1200u, result.network_rules);
++  EXPECT_EQ("202611170028", result.versions[0]);
++  std::string encoded;
++  ASSERT_TRUE(base::ReadFileToString(dir_.GetPath().AppendASCII("rules"), &encoded));
++  google::protobuf::io::ArrayInputStream input(encoded.data(), encoded.size());
++  UnindexedRulesetReader reader(&input);
++  url_pattern_index::proto::FilteringRules chunk;
++  size_t styles = 0;
++  bool activation_found = false;
++  while (reader.ReadNextChunk(&chunk)) {
++    styles += chunk.style_rules_size();
++    if (chunk.has_cosmetic_exceptions()) {
++      ASSERT_EQ(1, chunk.cosmetic_exceptions().generic_domains_size());
++      EXPECT_EQ("nohide.test", chunk.cosmetic_exceptions().generic_domains(0));
++      activation_found = true;
++    }
++  }
++  EXPECT_TRUE(activation_found);
++  EXPECT_EQ(4u, styles);
++}
++
++TEST_F(SendaCompilerTest, RejectsInvalidSourcesAndLimits) {
++  EXPECT_EQ(CompileStatus::kInvalidSource,
++            Compile("<html>error</html>", Source("EasyPrivacy")).status);
++  EXPECT_EQ(CompileStatus::kInvalidSource,
++            Compile(Source("Other"), Source("EasyPrivacy")).status);
++  EXPECT_EQ(CompileStatus::kInvalidSource,
++            Compile(Source("EasyList", "\xff"), Source("EasyPrivacy")).status);
++  EXPECT_EQ(CompileStatus::kLimitExceeded,
++            Compile(Source("EasyList", std::string(65537, 'a')),
++                    Source("EasyPrivacy")).status);
++  EXPECT_EQ(CompileStatus::kLimitExceeded,
++            Compile(std::string(20 * 1024 * 1024 + 1, 'a'),
++                    Source("EasyPrivacy")).status);
++}
++
++TEST_F(SendaCompilerTest, UnknownExceptionAndUnsafeSelectorsPreferUnderblocking) {
++  auto result = Compile(Source("EasyList", "##.bad {color:red}\n##.ad\n"
++      "~invalid.test#@#.ad\n##.safe\n@@/unknown-regex/$elemhide\n"), Source("EasyPrivacy"));
++  ASSERT_EQ(CompileStatus::kSuccess, result.status);
++  EXPECT_EQ(1u, result.cosmetic_rules);
++}
++
++TEST_F(SendaCompilerTest, InvalidOutputReturnsFailureInsteadOfCrashing) {
++  auto list = dir_.GetPath().AppendASCII("list");
++  auto privacy = dir_.GetPath().AppendASCII("privacy");
++  ASSERT_TRUE(base::WriteFile(list, Source("EasyList")));
++  ASSERT_TRUE(base::WriteFile(privacy, Source("EasyPrivacy")));
++  auto result = CompileSendaFilters(
++      base::File(list, base::File::FLAG_OPEN | base::File::FLAG_READ),
++      base::File(privacy, base::File::FLAG_OPEN | base::File::FLAG_READ), base::File());
++  EXPECT_EQ(CompileStatus::kWriteFailure, result.status);
++}
++
++TEST_F(SendaCompilerTest, NegativeDomainsCannotAmplifyBufferedSelectorsWithoutLimit) {
++  std::string domains;
++  for (int i = 0; i < 700; ++i) {
++    if (i) { domains += ','; }
++    domains += "~d" + std::to_string(i) + ".test";
++  }
++  auto result = Compile(Source("EasyList", domains + "##." +
++      std::string(40000, 'a') + "\n"), Source("EasyPrivacy"));
++  EXPECT_EQ(CompileStatus::kLimitExceeded, result.status);
++  EXPECT_LE(result.peak_style_bytes, 20u * 1024 * 1024);
++}
++
++TEST_F(SendaCompilerTest, QuotedAttributeValuesCanContainSemicolons) {
++  auto result = Compile(Source("EasyList",
++      "site.test##[style=\"display: block;\"]\n##.ad;body\n"), Source("EasyPrivacy"));
++  ASSERT_EQ(CompileStatus::kSuccess, result.status);
++  EXPECT_EQ(1u, result.cosmetic_rules);
++}
++}  // namespace
++}  // namespace subresource_filter
+diff --git a/components/subresource_filter/tools/rule_parser/senda_filter_official_unittest.cc b/components/subresource_filter/tools/rule_parser/senda_filter_official_unittest.cc
+new file mode 100644
+--- /dev/null
++++ b/components/subresource_filter/tools/rule_parser/senda_filter_official_unittest.cc
+@@ -0,0 +1,56 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#include "components/subresource_filter/tools/rule_parser/senda_filter_compiler.h"
++#include <iostream>
++#include "base/command_line.h"
++#include "base/files/file_util.h"
++#include "base/files/scoped_temp_dir.h"
++#include "base/time/time.h"
++#include "components/subresource_filter/core/common/indexed_ruleset.h"
++#include "components/subresource_filter/core/common/unindexed_ruleset.h"
++#include "testing/gtest/include/gtest/gtest.h"
++#include "third_party/protobuf/src/google/protobuf/io/zero_copy_stream_impl_lite.h"
++
++namespace subresource_filter {
++TEST(SendaOfficialSourcesTest, CompilesAndIndexesSuppliedListFiles) {
++  const auto* args = base::CommandLine::ForCurrentProcess();
++  if (!args->HasSwitch("senda-easylist") || !args->HasSwitch("senda-easyprivacy")) {
++    GTEST_SKIP() << "Pass --senda-easylist and --senda-easyprivacy for real-source validation";
++  }
++  base::ScopedTempDir directory;
++  ASSERT_TRUE(directory.CreateUniqueTempDir());
++  const auto output = directory.GetPath().AppendASCII("rules");
++  const auto start = base::TimeTicks::Now();
++  const auto result = CompileSendaFilters(
++      base::File(args->GetSwitchValuePath("senda-easylist"), base::File::FLAG_OPEN | base::File::FLAG_READ),
++      base::File(args->GetSwitchValuePath("senda-easyprivacy"), base::File::FLAG_OPEN | base::File::FLAG_READ),
++      base::File(output, base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_WRITE));
++  ASSERT_EQ(CompileStatus::kSuccess, result.status);
++  EXPECT_GE(result.network_rules, 1000u);
++  EXPECT_GT(result.cosmetic_rules, 0u);
++  std::string encoded;
++  ASSERT_TRUE(base::ReadFileToString(output, &encoded));
++  google::protobuf::io::ArrayInputStream input(encoded.data(), encoded.size());
++  UnindexedRulesetReader reader(&input);
++  url_pattern_index::proto::FilteringRules chunk;
++  RulesetIndexer index(42);
++  size_t exceptions = 0;
++  while (reader.ReadNextChunk(&chunk)) {
++    for (const auto& rule : chunk.url_rules()) { index.AddUrlRule(rule); }
++    for (const auto& rule : chunk.style_rules()) { index.AddStyleRuleFromProto(rule); }
++    if (chunk.has_cosmetic_exceptions()) {
++      ++exceptions;
++      index.SetCosmeticExceptions(chunk.cosmetic_exceptions());
++    }
++  }
++  EXPECT_EQ(1u, exceptions);
++  EXPECT_EQ(encoded.size(), static_cast<size_t>(reader.num_bytes_read()));
++  index.Finish();
++  EXPECT_TRUE(IndexedRulesetMatcher::Verify(index.data(), index.GetChecksum(), "Senda.Test"));
++  std::cout << "SENDA_COMPILER network=" << result.network_rules
++            << " cosmetic=" << result.cosmetic_rules
++            << " bytes=" << encoded.size()
++            << " elapsed_ms=" << (base::TimeTicks::Now() - start).InMilliseconds()
++            << " sha256=" << result.ruleset_sha256 << std::endl;
++}
++}  // namespace subresource_filter
+diff --git a/components/subresource_filter/content/mojom/BUILD.gn b/components/subresource_filter/content/mojom/BUILD.gn
+--- a/components/subresource_filter/content/mojom/BUILD.gn
++++ b/components/subresource_filter/content/mojom/BUILD.gn
+@@ -14,3 +14,11 @@
+   overridden_deps = [ "//third_party/blink/public/mojom:mojom_platform" ]
+   component_deps = [ "//third_party/blink/public/common" ]
+ }
++
++mojom("senda_filter_compiler") {
++  sources = [ "senda_filter_compiler.mojom" ]
++  deps = [
++    "//mojo/public/mojom/base",
++    "//sandbox/policy/mojom",
++  ]
++}
+diff --git a/components/subresource_filter/content/mojom/senda_filter_compiler.mojom b/components/subresource_filter/content/mojom/senda_filter_compiler.mojom
+new file mode 100644
+--- /dev/null
++++ b/components/subresource_filter/content/mojom/senda_filter_compiler.mojom
+@@ -0,0 +1,22 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++module senda.mojom;
++import "mojo/public/mojom/base/file.mojom";
++import "sandbox/policy/mojom/sandbox.mojom";
++
++enum FilterCompileStatus { kSuccess, kInvalidSource, kLimitExceeded, kWriteFailure };
++struct FilterCompileResult {
++  FilterCompileStatus status;
++  array<string, 2> versions;
++  array<string, 2> source_hashes;
++  string ruleset_sha256;
++  uint32 network_rules;
++  uint32 cosmetic_rules;
++};
++
++[ServiceSandbox=sandbox.mojom.Sandbox.kService]
++interface FilterCompiler {
++  Compile(mojo_base.mojom.ReadOnlyFile easylist,
++          mojo_base.mojom.ReadOnlyFile easyprivacy,
++          mojo_base.mojom.File output) => (FilterCompileResult result);
++};
+diff --git a/components/subresource_filter/content/utility/BUILD.gn b/components/subresource_filter/content/utility/BUILD.gn
+new file mode 100644
+--- /dev/null
++++ b/components/subresource_filter/content/utility/BUILD.gn
+@@ -0,0 +1,16 @@
++# Copyright 2026 The Senda Authors
++# Use of this source code is governed by a BSD-style license.
++source_set("senda_filter_compiler") {
++  sources = [
++    "senda_filter_compiler_impl.cc",
++    "senda_filter_compiler_impl.h",
++  ]
++  public_deps = [
++    "//components/subresource_filter/content/mojom:senda_filter_compiler",
++    "//mojo/public/cpp/bindings",
++  ]
++  deps = [
++    "//base",
++    "//components/subresource_filter/tools/rule_parser:senda_filter_compiler",
++  ]
++}
+diff --git a/components/subresource_filter/content/utility/senda_filter_compiler_impl.h b/components/subresource_filter/content/utility/senda_filter_compiler_impl.h
+new file mode 100644
+--- /dev/null
++++ b/components/subresource_filter/content/utility/senda_filter_compiler_impl.h
+@@ -0,0 +1,19 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#ifndef COMPONENTS_SUBRESOURCE_FILTER_CONTENT_UTILITY_SENDA_FILTER_COMPILER_IMPL_H_
++#define COMPONENTS_SUBRESOURCE_FILTER_CONTENT_UTILITY_SENDA_FILTER_COMPILER_IMPL_H_
++#include "components/subresource_filter/content/mojom/senda_filter_compiler.mojom.h"
++#include "mojo/public/cpp/bindings/receiver.h"
++namespace subresource_filter {
++class SendaFilterCompilerImpl : public senda::mojom::FilterCompiler {
++ public:
++  explicit SendaFilterCompilerImpl(
++      mojo::PendingReceiver<senda::mojom::FilterCompiler> receiver);
++  ~SendaFilterCompilerImpl() override;
++ private:
++  void Compile(base::File easylist, base::File easyprivacy, base::File output,
++               CompileCallback callback) override;
++  mojo::Receiver<senda::mojom::FilterCompiler> receiver_{this};
++};
++}  // namespace subresource_filter
++#endif
+diff --git a/components/subresource_filter/content/utility/senda_filter_compiler_impl.cc b/components/subresource_filter/content/utility/senda_filter_compiler_impl.cc
+new file mode 100644
+--- /dev/null
++++ b/components/subresource_filter/content/utility/senda_filter_compiler_impl.cc
+@@ -0,0 +1,33 @@
++// Copyright 2026 The Senda Authors
++// Use of this source code is governed by a BSD-style license.
++#include "components/subresource_filter/content/utility/senda_filter_compiler_impl.h"
++#include <utility>
++#include "components/subresource_filter/tools/rule_parser/senda_filter_compiler.h"
++namespace subresource_filter {
++SendaFilterCompilerImpl::SendaFilterCompilerImpl(
++    mojo::PendingReceiver<senda::mojom::FilterCompiler> receiver)
++    : receiver_(this, std::move(receiver)) {}
++SendaFilterCompilerImpl::~SendaFilterCompilerImpl() = default;
++void SendaFilterCompilerImpl::Compile(base::File easylist, base::File easyprivacy,
++                                     base::File output, CompileCallback callback) {
++  auto result = CompileSendaFilters(std::move(easylist), std::move(easyprivacy),
++                                    std::move(output));
++  auto reply = senda::mojom::FilterCompileResult::New();
++  switch (result.status) {
++    case CompileStatus::kSuccess:
++      reply->status = senda::mojom::FilterCompileStatus::kSuccess; break;
++    case CompileStatus::kInvalidSource:
++      reply->status = senda::mojom::FilterCompileStatus::kInvalidSource; break;
++    case CompileStatus::kLimitExceeded:
++      reply->status = senda::mojom::FilterCompileStatus::kLimitExceeded; break;
++    case CompileStatus::kWriteFailure:
++      reply->status = senda::mojom::FilterCompileStatus::kWriteFailure; break;
++  }
++  reply->versions.assign(result.versions.begin(), result.versions.end());
++  reply->source_hashes.assign(result.source_hashes.begin(), result.source_hashes.end());
++  reply->ruleset_sha256 = std::move(result.ruleset_sha256);
++  reply->network_rules = result.network_rules;
++  reply->cosmetic_rules = result.cosmetic_rules;
++  std::move(callback).Run(std::move(reply));
++}
++}  // namespace subresource_filter

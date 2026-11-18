@@ -56,11 +56,11 @@ Las rutas siguientes que empiezan por `components/`, `chrome/` o `third_party/bl
 
 **Interfaces:** `CompileResult CompileSendaFilters(base::File easylist, base::File easyprivacy, base::File output)` devuelve estado, versiones, contadores y hashes. Consume archivos de entrada de solo lectura y escribe un binario con el contrato de tarea 1. Mojo `senda.mojom.FilterCompiler.Compile(ReadOnlyFile easylist, ReadOnlyFile easyprivacy, File output) => (CompileResult result)` usa `[ServiceSandbox=sandbox.mojom.Sandbox.kService]`; el navegador conserva las rutas y el servicio solo recibe handles.
 
-- [ ] En `senda_filter_compiler_unittest.cc` definir fixtures mínimos válidos de ambos títulos y casos de HTML, UTF-8, versiones ausentes, límites de tamaño/línea/cantidad, selectores con declaraciones o sintaxis no admitida, excepciones negativas y desconocidas. Comparar salida semántica con fixtures del generador Python, no solo contadores. Definir mínimo de 1000 reglas de red combinadas para producción; fixtures pueden generar ese volumen de reglas distintas.
-- [ ] Compilar/ejecutar y confirmar fallo antes de implementar el conversor.
-- [ ] Implementar `CompileSendaFilters` reutilizando el parser nativo y `UnindexedRulesetWriter`, sin `CHECK` sobre datos externos ni CLI. Acotar también estructuras auxiliares y salida. Ante error no devolver éxito parcial. Implementar Mojo y registrar servicio en utilidad; no darle fábrica de red. No compartirlo con servicios persistentes.
-- [ ] Ampliar target de pruebas y añadir integración Mojo: compilación válida, error de escritura y desconexión/crash. Confirmar que el proceso termina al cerrar el remote y que puede trabajar mediante handles bajo sandbox en Windows.
-- [ ] Compilar y ejecutar pruebas nuevas; generar `patches/0012-senda-sandboxed-filter-compiler.patch` y guardar commit de tarea.
+- [x] En `senda_filter_compiler_unittest.cc` definir fixtures mínimos válidos de ambos títulos y casos de HTML, UTF-8, versiones ausentes, límites de tamaño/línea/cantidad, selectores con declaraciones o sintaxis no admitida, excepciones negativas y desconocidas. Comparar salida semántica con fixtures del generador Python, no solo contadores. Definir mínimo de 1000 reglas de red combinadas para producción; fixtures pueden generar ese volumen de reglas distintas.
+- [x] Compilar/ejecutar y confirmar fallo antes de implementar el conversor.
+- [x] Implementar `CompileSendaFilters` reutilizando el parser nativo y `UnindexedRulesetWriter`, sin `CHECK` sobre datos externos ni CLI. Acotar también estructuras auxiliares y salida. Ante error no devolver éxito parcial. Implementar Mojo y registrar servicio en utilidad; no darle fábrica de red. No compartirlo con servicios persistentes.
+- [x] Ampliar target de pruebas y añadir integración Mojo: compilación válida, error de escritura y desconexión/crash. Confirmar que el proceso termina al cerrar el remote y que puede trabajar mediante handles bajo sandbox en Windows.
+- [x] Compilar y ejecutar pruebas nuevas; generar `patches/0012-senda-sandboxed-filter-compiler.patch` y guardar commit de tarea.
 
 ### Task 3: Almacén transaccional y selección al arrancar
 
